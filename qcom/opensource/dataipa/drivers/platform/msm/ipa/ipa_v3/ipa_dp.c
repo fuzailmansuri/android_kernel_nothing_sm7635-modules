@@ -1920,9 +1920,10 @@ fail_napi:
 		netif_napi_del(&ep->sys->napi_rx);
 	}
 	/* Delete NAPI TX object. */
-	if (ipa3_ctx->tx_napi_enable &&
-		(IPA_CLIENT_IS_PROD(sys_in->client)))
+	if (ep->sys->napi_tx_enable) {
+		napi_disable(&ep->sys->napi_tx);
 		netif_napi_del(&ep->sys->napi_tx);
+	}
 fail_gen2:
 	ipa_pm_deregister(ep->sys->pm_hdl);
 fail_pm:
