@@ -96,6 +96,7 @@ static void hif_init_rx_thread_napi(struct qca_napi_info *napii)
  */
 static void hif_deinit_rx_thread_napi(struct qca_napi_info *napii)
 {
+	qdf_napi_disable(&napii->rx_thread_napi);
 	qdf_netif_napi_del(&napii->rx_thread_napi);
 }
 #else /* RECEIVE_OFFLOAD */

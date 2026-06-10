@@ -3954,6 +3954,32 @@ free_mem:
 		qdf_mem_free(assoc_ind->assocReqPtr);
 }
 
+static struct assoc_ind *csr_roam_copy_assoc_ind(const struct assoc_ind *src)
+{
+	struct assoc_ind *dst;
+
+	dst = qdf_mem_malloc(sizeof(*dst));
+	if (!dst)
+		return NULL;
+
+	qdf_mem_copy(dst, src, sizeof(*dst));
+	dst->assocReqPtr = NULL;
+	if (src->assocReqLength) {
+		if (!src->assocReqPtr)
+			goto fail;
+		dst->assocReqPtr = qdf_mem_malloc(src->assocReqLength);
+		if (!dst->assocReqPtr)
+			goto fail;
+		qdf_mem_copy(dst->assocReqPtr, src->assocReqPtr,
+			     src->assocReqLength);
+	}
+	return dst;
+
+fail:
+	qdf_mem_free(dst);
+	return NULL;
+}
+
 static void
 csr_roam_chk_lnk_assoc_ind(struct mac_context *mac_ctx, tSirSmeRsp *msg_ptr)
 {
@@ -4038,17 +4064,22 @@ csr_roam_chk_lnk_assoc_ind(struct mac_context *mac_ctx, tSirSmeRsp *msg_ptr)
 		}
 		sme_debug("Receive AUTH_TYPE of %d", csr_akm_type);
 		if (csr_akm_type == eCSR_AUTH_TYPE_OWE) {
-			roam_info->owe_pending_assoc_ind = qdf_mem_malloc(
-							    sizeof(*pAssocInd));
-			if (roam_info->owe_pending_assoc_ind)
-				qdf_mem_copy(roam_info->owe_pending_assoc_ind,
-					     pAssocInd, sizeof(*pAssocInd));
+			roam_info->owe_pending_assoc_ind =
+				csr_roam_copy_assoc_ind(pAssocInd);
 		} else if (csr_akm_type == eCSR_AUTH_TYPE_FT_RSN_PSK) {
-			roam_info->ft_pending_assoc_ind = qdf_mem_malloc(
-			    sizeof(*pAssocInd));
-			if (roam_info->ft_pending_assoc_ind)
-				qdf_mem_copy(roam_info->ft_pending_assoc_ind,
-					     pAssocInd, sizeof(*pAssocInd));
+			roam_info->ft_pending_assoc_ind =
+				csr_roam_copy_assoc_ind(pAssocInd);
+		}
+		if ((csr_akm_type == eCSR_AUTH_TYPE_OWE &&
+		     !roam_info->owe_pending_assoc_ind) ||
+		    (csr_akm_type == eCSR_AUTH_TYPE_FT_RSN_PSK &&
+		     !roam_info->ft_pending_assoc_ind)) {
+			sme_err("Failed to copy pending association request");
+			csr_send_assoc_cnf_msg(mac_ctx, pAssocInd,
+					       QDF_STATUS_E_NOMEM,
+					       STATUS_UNSPECIFIED_FAILURE);
+			qdf_mem_free(roam_info);
+			return;
 		}
 		status = csr_roam_call_callback(mac_ctx, sessionId,
 					roam_info, eCSR_ROAM_INFRA_IND,
@@ -4056,9 +4087,13 @@ csr_roam_chk_lnk_assoc_ind(struct mac_context *mac_ctx, tSirSmeRsp *msg_ptr)
 		if (!QDF_IS_STATUS_SUCCESS(status)) {
 			/* Refused due to Mac filtering */
 			if (roam_info->owe_pending_assoc_ind) {
+				if (roam_info->owe_pending_assoc_ind->assocReqPtr)
+					qdf_mem_free(roam_info->owe_pending_assoc_ind->assocReqPtr);
 				qdf_mem_free(roam_info->owe_pending_assoc_ind);
 				roam_info->owe_pending_assoc_ind = NULL;
 			} else if (roam_info->ft_pending_assoc_ind) {
+				if (roam_info->ft_pending_assoc_ind->assocReqPtr)
+					qdf_mem_free(roam_info->ft_pending_assoc_ind->assocReqPtr);
 				qdf_mem_free(roam_info->ft_pending_assoc_ind);
 				roam_info->ft_pending_assoc_ind = NULL;
 			}
