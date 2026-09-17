@@ -296,6 +296,9 @@ int dsi_display_set_backlight(struct drm_connector *connector,
 		}
 	}
 
+	if (bl_temp > 4094 && !strcmp(panel->name, "rm69220 amoled vid mode dsi visionox panel with DSC"))
+		bl_temp = 4094;
+
 	rc = dsi_panel_set_backlight(panel, (u32)bl_temp);
 	if (rc)
 		DSI_ERR("unable to set backlight\n");
@@ -997,6 +1000,10 @@ int dsi_display_check_status(struct drm_connector *connector, void *display,
 
 	/* Prevent another ESD check,when ESD recovery is underway */
 	if (atomic_read(&panel->esd_recovery_pending))
+		goto release_panel_lock;
+
+	/* Skip ESD check when HBM (sunlight or local) is active to avoid false panel dead */
+	if (panel->lhbm_state || panel->lhbm_wait || panel->bl_config.bl_level >= 3400)
 		goto release_panel_lock;
 
 	status_mode = panel->esd_config.status_mode;
@@ -8046,10 +8053,10 @@ int dsi_display_set_mode(struct dsi_display *display,
 		}
 	}
 
-/* 	if (display->panel->lhbm_state && mode->timing.refresh_rate != 120) {
+	if (display->panel->lhbm_state && mode->timing.refresh_rate != 120) {
 		fp_status = 0;
 		dsi_display_set_lhbm_state(display, 0);
-	} */
+	}
 
 	rc = dsi_display_validate_mode_set(display, &adj_mode, flags);
 	if (rc) {
