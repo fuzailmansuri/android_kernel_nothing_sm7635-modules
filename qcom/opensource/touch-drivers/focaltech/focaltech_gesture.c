@@ -251,6 +251,8 @@ static ssize_t fts_gesture_single_tap_enabled_store(struct device *dev,
 
     mutex_lock(&ts_data->input_dev->mutex);
     ts_data->single_tap_enabled = val;
+
+    fts_gesture_write(ts_data, val || ts_data->double_tap_enabled);
     mutex_unlock(&ts_data->input_dev->mutex);
 
     return count;
@@ -338,7 +340,7 @@ static void fts_gesture_report(struct input_dev *input_dev, int gesture_id)
         gesture = KEY_GESTURE_DOWN;
         break;
     case GESTURE_DOUBLECLICK:
-        gesture = KEY_GESTURE_U;
+        gesture = fts_data->double_tap_enabled ? KEY_WAKEUP : -1;
         break;
     case GESTURE_O:
         gesture = KEY_GESTURE_O;
@@ -538,6 +540,7 @@ int fts_gesture_init(struct fts_ts_data *ts_data)
     FTS_FUNC_ENTER();
     input_set_capability(input_dev, EV_KEY, KEY_POWER);
     input_set_capability(input_dev, EV_KEY, KEY_GESTURE_U);
+    input_set_capability(input_dev, EV_KEY, KEY_WAKEUP);
     input_set_capability(input_dev, EV_KEY, KEY_GESTURE_UP);
     input_set_capability(input_dev, EV_KEY, KEY_GESTURE_DOWN);
     input_set_capability(input_dev, EV_KEY, KEY_GESTURE_LEFT);

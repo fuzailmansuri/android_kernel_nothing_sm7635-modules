@@ -678,17 +678,16 @@ static ssize_t fts_gesture_store(
 
     mutex_lock(&ts_data->input_dev->mutex);
     if (FTS_SYSFS_ECHO_ON(buf)) {
-        FTS_DEBUG("enable gesture");
-        ts_data->gesture_support = ENABLE;
+        FTS_DEBUG("enable double tap");
+        ts_data->double_tap_enabled = ENABLE;
     } else if (FTS_SYSFS_ECHO_OFF(buf)) {
-        FTS_DEBUG("disable gesture");
-        ts_data->gesture_support = DISABLE;
+        FTS_DEBUG("disable double tap");
+        ts_data->double_tap_enabled = DISABLE;
     }
+    ts_data->gesture_support = ts_data->double_tap_enabled || ts_data->single_tap_enabled;
     mutex_unlock(&ts_data->input_dev->mutex);
 
     return count;
-
-
 }
 
 static int fts_gesture_open(struct inode* inode, struct file* file){

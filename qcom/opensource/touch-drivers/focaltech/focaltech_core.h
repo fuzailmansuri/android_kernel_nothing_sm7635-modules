@@ -270,6 +270,7 @@ struct fts_ts_data {
     u8 gesture_bmode;       /*gesture buffer mode*/
     bool single_tap_enabled;
     bool single_tap_pressed;
+    bool double_tap_enabled;
 
     int fod_fp_down;
     int fp_down_report;
