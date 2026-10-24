@@ -321,6 +321,10 @@ static int fts_create_gesture_sysfs(struct device *dev)
     return 0;
 }
 
+#define FTS_DOUBLE_TAP_WINDOW_MS                400
+
+static unsigned long last_click;
+
 static void fts_gesture_report(struct input_dev *input_dev, int gesture_id)
 {
     int gesture;
@@ -374,7 +378,21 @@ static void fts_gesture_report(struct input_dev *input_dev, int gesture_id)
             fts_data->single_tap_pressed = 1;
             sysfs_notify(&fts_data->dev->kobj, NULL, "fts_gesture_single_tap_pressed");
         }
-        fallthrough;
+        /*
+         * The firmware reports each tap as a click and never as a double
+         * click, so build the double tap from two clicks in a row.
+         */
+        if (fts_data->double_tap_enabled) {
+            if (last_click &&
+                time_before(jiffies, last_click + msecs_to_jiffies(FTS_DOUBLE_TAP_WINDOW_MS))) {
+                last_click = 0;
+                gesture = KEY_WAKEUP;
+                break;
+            }
+            last_click = jiffies ? jiffies : 1;
+        }
+        gesture = -1;
+        break;
     default:
         gesture = -1;
         break;
