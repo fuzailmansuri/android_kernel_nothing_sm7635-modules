@@ -252,7 +252,7 @@ static ssize_t fts_gesture_single_tap_enabled_store(struct device *dev,
     mutex_lock(&ts_data->input_dev->mutex);
     ts_data->single_tap_enabled = val;
 
-    fts_gesture_write(ts_data, val || ts_data->double_tap_enabled);
+    ts_data->gesture_support = val || ts_data->double_tap_enabled;
     mutex_unlock(&ts_data->input_dev->mutex);
 
     return count;
