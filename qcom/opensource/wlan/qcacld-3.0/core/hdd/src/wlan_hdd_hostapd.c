@@ -7092,6 +7092,8 @@ int wlan_hdd_cfg80211_start_bss(struct wlan_hdd_link_info *link_info,
 
 	sap_ctx = WLAN_HDD_GET_SAP_CTX_PTR(link_info);
 	if (!sap_ctx) {
+		mutex_unlock(&hdd_ctx->sap_lock);
+		hdd_set_connection_in_progress(false);
 		ret = -EINVAL;
 		goto error;
 	}
@@ -7372,6 +7374,7 @@ static int __wlan_hdd_cfg80211_stop_ap(struct wiphy *wiphy,
 				WLAN_IF_MGR_EV_AP_STOP_BSS_COMPLETE, NULL);
 		if (!QDF_IS_STATUS_SUCCESS(status)) {
 			hdd_err("Stopping the BSS failed");
+			mutex_unlock(&hdd_ctx->sap_lock);
 			goto exit;
 		}
 		qdf_mem_free(ap_ctx->beacon);
