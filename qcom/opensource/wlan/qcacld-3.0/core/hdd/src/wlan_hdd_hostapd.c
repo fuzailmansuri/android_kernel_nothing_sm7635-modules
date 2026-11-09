@@ -137,8 +137,6 @@
 /* Defines the BIT position of 11be support mode field of stainfo */
 #define HDD_80211_MODE_BE 4
 
-#define HDD_MAX_CUSTOM_START_EVENT_SIZE 64
-
 #ifdef NDP_SAP_CONCURRENCY_ENABLE
 #define MAX_SAP_NUM_CONCURRENCY_WITH_NAN 2
 #else
@@ -2148,15 +2146,14 @@ QDF_STATUS hdd_hostapd_sap_event_cb(struct sap_event *sap_event,
 	struct net_device *dev;
 	eSapHddEvent event_id;
 	union iwreq_data wrqu;
-	uint8_t *we_custom_event_generic = NULL;
+	const char *we_custom_event_generic = NULL;
 	int we_event = 0;
 	uint8_t sta_id;
 	QDF_STATUS qdf_status;
 	bool bAuthRequired = true;
 	char *unknownSTAEvent = NULL;
 	char *maxAssocExceededEvent = NULL;
-	uint8_t *we_custom_start_event = NULL;
-	char *startBssEvent;
+	const char *start_bss_event = "SOFTAP.enabled";
 	struct hdd_context *hdd_ctx;
 	struct iw_michaelmicfailure msg;
 	uint8_t ignoreCAC = 0;
@@ -2386,20 +2383,10 @@ QDF_STATUS hdd_hostapd_sap_event_cb(struct sap_event *sap_event,
 		/* Fill the params for sending IWEVCUSTOM Event
 		 * with SOFTAP.enabled
 		 */
-		we_custom_start_event =
-				qdf_mem_malloc(HDD_MAX_CUSTOM_START_EVENT_SIZE);
-		if (!we_custom_start_event)
-			goto stopbss;
-
-		startBssEvent = "SOFTAP.enabled";
-		memset(we_custom_start_event, '\0',
-		       sizeof(HDD_MAX_CUSTOM_START_EVENT_SIZE));
-		memcpy(we_custom_start_event, startBssEvent,
-		       strlen(startBssEvent));
 		memset(&wrqu, 0, sizeof(wrqu));
-		wrqu.data.length = strlen(startBssEvent);
+		wrqu.data.length = strlen(start_bss_event);
 		we_event = IWEVCUSTOM;
-		we_custom_event_generic = we_custom_start_event;
+		we_custom_event_generic = start_bss_event;
 		wlan_hdd_set_tx_flow_info();
 		sap_ctx = WLAN_HDD_GET_SAP_CTX_PTR(link_info);
 		if (!sap_ctx) {
@@ -2639,7 +2626,7 @@ QDF_STATUS hdd_hostapd_sap_event_cb(struct sap_event *sap_event,
 		memset(&wrqu, 0, sizeof(wrqu));
 		wrqu.data.length = sizeof(msg);
 		we_event = IWEVMICHAELMICFAILURE;
-		we_custom_event_generic = (uint8_t *) &msg;
+		we_custom_event_generic = (const char *)&msg;
 	}
 		/* inform mic failure to nl80211 */
 		cfg80211_michael_mic_failure(dev,
@@ -3006,7 +2993,7 @@ QDF_STATUS hdd_hostapd_sap_event_cb(struct sap_event *sap_event,
 		we_event = IWEVCUSTOM;  /* Discovered a new node (AP mode). */
 		wrqu.data.pointer = unknownSTAEvent;
 		wrqu.data.length = strlen(unknownSTAEvent);
-		we_custom_event_generic = (uint8_t *) unknownSTAEvent;
+		we_custom_event_generic = unknownSTAEvent;
 		hdd_err("%s", unknownSTAEvent);
 		break;
 
@@ -3023,7 +3010,7 @@ QDF_STATUS hdd_hostapd_sap_event_cb(struct sap_event *sap_event,
 		we_event = IWEVCUSTOM;  /* Discovered a new node (AP mode). */
 		wrqu.data.pointer = maxAssocExceededEvent;
 		wrqu.data.length = strlen(maxAssocExceededEvent);
-		we_custom_event_generic = (uint8_t *) maxAssocExceededEvent;
+		we_custom_event_generic = maxAssocExceededEvent;
 		hdd_debug("%s", maxAssocExceededEvent);
 		break;
 	case eSAP_STA_ASSOC_IND:
@@ -3213,8 +3200,7 @@ QDF_STATUS hdd_hostapd_sap_event_cb(struct sap_event *sap_event,
 	}
 
 	hdd_wext_send_event(dev, we_event, &wrqu,
-			    (char *)we_custom_event_generic);
-	qdf_mem_free(we_custom_start_event);
+			    we_custom_event_generic);
 	qdf_mem_free(unknownSTAEvent);
 	qdf_mem_free(maxAssocExceededEvent);
 
@@ -3222,9 +3208,8 @@ QDF_STATUS hdd_hostapd_sap_event_cb(struct sap_event *sap_event,
 
 stopbss:
 	{
-		uint8_t *we_custom_event;
-		char *stopBssEvent = "STOP-BSS.response";       /* 17 */
-		int event_len = strlen(stopBssEvent);
+		const char *stop_bss_event = "STOP-BSS.response";
+		int event_len = strlen(stop_bss_event);
 
 		hdd_debug("BSS stop status = %s",
 		       sap_event->sapevt.sapStopBssCompleteEvent.status ?
@@ -3269,26 +3254,14 @@ stopbss:
 			}
 		}
 
-		we_custom_event =
-			qdf_mem_malloc(HDD_MAX_CUSTOM_START_EVENT_SIZE);
-		if (!we_custom_event)
-			return QDF_STATUS_E_NOMEM;
-
 		/* notify userspace that the BSS has stopped */
-		memset(we_custom_event, '\0',
-		       sizeof(HDD_MAX_CUSTOM_START_EVENT_SIZE));
-		memcpy(we_custom_event, stopBssEvent, event_len);
 		memset(&wrqu, 0, sizeof(wrqu));
 		wrqu.data.length = event_len;
 		we_event = IWEVCUSTOM;
-		we_custom_event_generic = we_custom_event;
-		hdd_wext_send_event(dev, we_event, &wrqu,
-				    (char *)we_custom_event_generic);
+		hdd_wext_send_event(dev, we_event, &wrqu, stop_bss_event);
 
-		qdf_mem_free(we_custom_start_event);
 		qdf_mem_free(unknownSTAEvent);
 		qdf_mem_free(maxAssocExceededEvent);
-		qdf_mem_free(we_custom_event);
 
 		/* once the event is set, structure dev/adapter should
 		 * not be touched since they are now subject to being deleted
