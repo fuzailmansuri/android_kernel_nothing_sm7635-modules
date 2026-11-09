@@ -42,10 +42,6 @@ static const u32 cwb_irq_tbl[PINGPONG_MAX] = {SDE_NONE, INTR_IDX_PP1_OVFL,
 	INTR_IDX_PP2_OVFL, INTR_IDX_PP3_OVFL, INTR_IDX_PP4_OVFL,
 	INTR_IDX_PP5_OVFL, SDE_NONE, SDE_NONE};
 
-static const u32 dcwb_irq_tbl[PINGPONG_MAX] = {SDE_NONE, SDE_NONE,
-	SDE_NONE, SDE_NONE, SDE_NONE, SDE_NONE,
-	INTR_IDX_PP_CWB_OVFL, SDE_NONE, INTR_IDX_PP_CWB2_OVFL, SDE_NONE};
-
 /**
  * sde_rgb2yuv_601l - rgb to yuv color space conversion matrix
  *
@@ -1985,7 +1981,7 @@ static void sde_encoder_phys_wb_irq_ctrl(struct sde_encoder_phys *phys, bool ena
 		return;
 
 	pp = phys->hw_pp->idx - PINGPONG_0;
-	if ((pp + CRTC_DUAL_MIXERS_ONLY) >= PINGPONG_MAX) {
+	if (pp < 0 || (pp + CRTC_DUAL_MIXERS_ONLY) >= PINGPONG_MAX) {
 		SDE_ERROR("[enc:%d wb:%d] invalid pp:%d\n", DRMID(phys->parent), WBID(wb_enc), pp);
 		return;
 	}
@@ -1994,12 +1990,11 @@ static void sde_encoder_phys_wb_irq_ctrl(struct sde_encoder_phys *phys, bool ena
 	 * For Dedicated CWB, only one overflow IRQ is used for
 	 * both the PP_CWB blks. Make sure only one IRQ is registered
 	 * when D-CWB is enabled.
+	 * For targets where DCWB and CWB support is not needed,
+	 * reset irq table to avoid registration of unsupported irqs.
 	 */
 	wb_cfg = wb_enc->hw_wb->caps;
-	if (wb_cfg->features & BIT(SDE_WB_HAS_DCWB)) {
-		max_num_of_irqs = 1;
-		irq_table = dcwb_irq_tbl;
-	} else {
+	if (wb_cfg->features & BIT(SDE_WB_HAS_CWB)) {
 		max_num_of_irqs = CRTC_DUAL_MIXERS_ONLY;
 		irq_table = cwb_irq_tbl;
 	}
@@ -2014,6 +2009,12 @@ static void sde_encoder_phys_wb_irq_ctrl(struct sde_encoder_phys *phys, bool ena
 		for (index = 0; index < max_num_of_irqs; index++)
 			if (irq_table[index + pp] != SDE_NONE)
 				sde_encoder_helper_register_irq(phys, irq_table[index + pp]);
+
+		/* Register overflow IRQ for associated Dedicated CWB */
+		if (phys->hw_pp->dcwb_idx == DCWB_0 || phys->hw_pp->dcwb_idx == DCWB_1)
+			sde_encoder_helper_register_irq(phys, INTR_IDX_PP_CWB_OVFL);
+		else if (phys->hw_pp->dcwb_idx == DCWB_2 || phys->hw_pp->dcwb_idx == DCWB_3)
+			sde_encoder_helper_register_irq(phys, INTR_IDX_PP_CWB2_OVFL);
 	} else if (!enable && atomic_dec_return(&phys->wbirq_refcount) == 0) {
 		sde_encoder_helper_unregister_irq(phys, INTR_IDX_WB_DONE);
 		sde_encoder_helper_unregister_irq(phys, INTR_IDX_CTL_START);
@@ -2024,6 +2025,12 @@ static void sde_encoder_phys_wb_irq_ctrl(struct sde_encoder_phys *phys, bool ena
 		for (index = 0; index < max_num_of_irqs; index++)
 			if (irq_table[index + pp] != SDE_NONE)
 				sde_encoder_helper_unregister_irq(phys, irq_table[index + pp]);
+
+		/* Unregister overflow IRQ for associated Dedicated CWB */
+		if (phys->hw_pp->dcwb_idx == DCWB_0 || phys->hw_pp->dcwb_idx == DCWB_1)
+			sde_encoder_helper_unregister_irq(phys, INTR_IDX_PP_CWB_OVFL);
+		else if (phys->hw_pp->dcwb_idx == DCWB_2 || phys->hw_pp->dcwb_idx == DCWB_3)
+			sde_encoder_helper_unregister_irq(phys, INTR_IDX_PP_CWB2_OVFL);
 	}
 }
 
