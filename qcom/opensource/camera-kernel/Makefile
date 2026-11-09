@@ -9,10 +9,12 @@ KBUILD_EXTRA_SYMBOLS := \
     $(OUT_DIR)/../sm7635-modules/qcom/opensource/mmrm-driver/Module.symvers \
     $(OUT_DIR)/../sm7635-modules/qcom/opensource/securemsm-kernel/Module.symvers
 
-ifneq ($(BOARD_PLATFORM), volcano)
+ifneq ($(TARGET_BOARD_PLATFORM), volcano)
 KBUILD_EXTRA_SYMBOLS += \
     $(OUT_DIR)/../sm7635-modules/qcom/opensource/synx-kernel/Module.symvers
 endif
+
+KBUILD_OPTIONS += KBUILD_EXTRA_SYMBOLS="$(KBUILD_EXTRA_SYMBOLS)"
 
 all: modules
 

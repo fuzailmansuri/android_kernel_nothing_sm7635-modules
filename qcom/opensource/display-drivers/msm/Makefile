@@ -11,11 +11,13 @@ KBUILD_EXTRA_SYMBOLS := \
     $(OUT_DIR)/../sm7635-modules/qcom/opensource/mm-drivers/sync_fence/Module.symvers \
     $(OUT_DIR)/../sm7635-modules/qcom/opensource/securemsm-kernel/Module.symvers
 
-ifneq ($(BOARD_PLATFORM), volcano)
+ifneq ($(TARGET_BOARD_PLATFORM), volcano)
 KBUILD_EXTRA_SYMBOLS += \
     $(OUT_DIR)/../sm7635-modules/qcom/opensource/mm-drivers/hw_fence/Module.symvers \
     $(OUT_DIR)/../sm7635-modules/qcom/opensource/mmrm-driver/Module.symvers
 endif
+
+KBUILD_OPTIONS += KBUILD_EXTRA_SYMBOLS="$(KBUILD_EXTRA_SYMBOLS)"
 
 all: modules
 
@@ -23,7 +25,7 @@ modules_install:
 	$(MAKE) INSTALL_MOD_STRIP=1 -C $(KERNEL_SRC) M=$(M) modules_install
 
 %:
-	$(MAKE) -C $(KERNEL_SRC) M=$(M) $@ $(KBUILD_OPTIONS) $(KBUILD_EXTRA_SYMBOLS)
+	$(MAKE) -C $(KERNEL_SRC) M=$(M) $@ $(KBUILD_OPTIONS)
 
 clean:
 	rm -f *.o *.ko *.mod.c *.mod.o *~ .*.cmd Module.symvers
