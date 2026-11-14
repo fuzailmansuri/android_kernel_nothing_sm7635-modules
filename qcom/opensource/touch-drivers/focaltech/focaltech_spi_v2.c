@@ -79,6 +79,11 @@ static int fts_spi_transfer(u8 *tx_buf, u8 *rx_buf, u32 len)
         .len    = len,
     };
 
+#if IS_ENABLED(CONFIG_PM) && FTS_PATCH_COMERR_PM
+    if (smp_load_acquire(&fts_data->pm_suspend))
+        return -EBUSY;
+#endif
+
     spi_message_init(&msg);
     spi_message_add_tail(&xfer, &msg);
 
@@ -204,6 +209,11 @@ int fts_write(u8 *writebuf, u32 writelen)
 
     for (i = 0; i < SPI_RETRY_NUMBER; i++) {
         ret = fts_spi_transfer(txbuf, rxbuf, txlen);
+#if IS_ENABLED(CONFIG_PM) && FTS_PATCH_COMERR_PM
+        /* PM rejection is not a controller error to retry while suspended. */
+        if (ret == -EBUSY && smp_load_acquire(&ts_data->pm_suspend))
+            goto err_write;
+#endif
         if ((0 == ret) && ((rxbuf[3] & 0xA0) == 0)) {
             break;
         } else {
@@ -296,6 +306,11 @@ int fts_read(u8 *cmd, u32 cmdlen, u8 *data, u32 datalen)
 
     for (i = 0; i < SPI_RETRY_NUMBER; i++) {
         ret = fts_spi_transfer(txbuf, rxbuf, txlen);
+#if IS_ENABLED(CONFIG_PM) && FTS_PATCH_COMERR_PM
+        /* PM rejection is not a controller error to retry while suspended. */
+        if (ret == -EBUSY && smp_load_acquire(&ts_data->pm_suspend))
+            goto err_read;
+#endif
         if ((0 == ret) && ((rxbuf[3] & 0xA0) == 0)) {
             memcpy(data, &rxbuf[dp], datalen);
             /* crc check */
@@ -554,8 +569,10 @@ static int fts_pm_suspend(struct device *dev)
     struct fts_ts_data *ts_data = dev_get_drvdata(dev);
 
     FTS_ERROR("system enters into pm_suspend");
-    ts_data->pm_suspend = true;
+    mutex_lock(&ts_data->bus_lock);
     reinit_completion(&ts_data->pm_completion);
+    smp_store_release(&ts_data->pm_suspend, true);
+    mutex_unlock(&ts_data->bus_lock);
     return 0;
 }
 
@@ -564,8 +581,8 @@ static int fts_pm_resume(struct device *dev)
     struct fts_ts_data *ts_data = dev_get_drvdata(dev);
 
     FTS_ERROR("system resumes from pm_suspend");
-    ts_data->pm_suspend = false;
-    complete(&ts_data->pm_completion);
+    smp_store_release(&ts_data->pm_suspend, false);
+    complete_all(&ts_data->pm_completion);
     return 0;
 }
 

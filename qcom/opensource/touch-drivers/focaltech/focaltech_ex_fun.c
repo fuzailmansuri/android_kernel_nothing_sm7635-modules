@@ -477,16 +477,20 @@ static int TP_charger_open(struct inode* inode, struct file* file){
 static int fts_pocket_mode_show(struct seq_file *s, void *unused)
 {
     u8 val = 0;
+    int ret;
     struct fts_ts_data *ts_data = fts_data;
 
     mutex_lock(&ts_data->input_dev->mutex);
-    fts_read_reg(FTS_REG_POCKET_MODE, &val);
+    ret = fts_read_reg(FTS_REG_POCKET_MODE, &val);
+    if (ret < 0)
+        goto out;
 
     seq_printf(s, "POCKET Mode:%s\n", ts_data->pocket_mode ? "On" : "Off");
     seq_printf(s, "POCKET Mode:Reg(0x9A)=%d\n", val);
+out:
     mutex_unlock(&ts_data->input_dev->mutex);
 
-    return 0;
+    return ret;
 }
 
 static ssize_t fts_pocket_mode_store(
@@ -510,34 +514,41 @@ static ssize_t fts_pocket_mode_store(
     mutex_lock(&ts_data->input_dev->mutex);
 
     FTS_ERROR("pocket mode info:pm_suspend = %d\n", ts_data->pm_suspend);
-    if (ts_data->pm_suspend)
+    if (READ_ONCE(ts_data->pm_suspend))
         __pm_stay_awake(ts_data->p_ws);
 
     if (FTS_SYSFS_ECHO_ON(buf)) {
         FTS_ERROR("Pre-pocket_mode = %d, Enter pocket mode", ts_data->pocket_mode);
         ret = fts_write_reg(FTS_REG_POCKET_MODE, ENABLE);
+        if (ret < 0)
+            goto out;
         ts_data->pocket_mode = ENABLE;
         fts_esdcheck_switch(ts_data, DISABLE);
         msleep(10); //Ensure that the firmware completes the pocket mode process.
     } else if (FTS_SYSFS_ECHO_OFF(buf)) {
         FTS_ERROR("Pre-pocket_mode = %d, Exit pocket mode", ts_data->pocket_mode);
         ret = fts_write_reg(FTS_REG_POCKET_MODE, DISABLE);
-        if (!ts_data->suspended) {
-            fts_esdcheck_switch(ts_data, ENABLE);
-        }
+        if (ret < 0)
+            goto out;
         msleep(10);
-        fts_read_reg(FTS_REG_POWER_MODE, &state);
+        ret = fts_read_reg(FTS_REG_POWER_MODE, &state);
+        if (ret < 0)
+            goto out;
         if (state == 2) {
             ret = fts_write_reg(FTS_REG_POWER_MODE, 0);
-            if (!ts_data->suspended) {
-                fts_esdcheck_switch(ts_data, ENABLE);
-            }
+            if (ret < 0)
+                goto out;
         }
         ts_data->pocket_mode = DISABLE;
+        if (!ts_data->suspended)
+            fts_esdcheck_switch(ts_data, ENABLE);
     }
+out:
     __pm_relax(ts_data->p_ws);
     mutex_unlock(&ts_data->input_dev->mutex);
 
+    if (ret < 0)
+        return ret;
     return count;
 }
 

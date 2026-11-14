@@ -1355,22 +1355,22 @@ static int fts_irq_read_report(struct fts_ts_data *ts_data)
 static irqreturn_t fts_irq_handler(int irq, void *data)
 {
     struct fts_ts_data *ts_data = fts_data;
-#if 0
+#if IS_ENABLED(CONFIG_PM) && FTS_PATCH_COMERR_PM
     int ret = 0;
 
-    if ((ts_data->suspended) && (ts_data->pm_suspend)) {
+    while (smp_load_acquire(&ts_data->pm_suspend)) {
+        __pm_stay_awake(ts_data->p_ws);
         ret = wait_for_completion_timeout(
                   &ts_data->pm_completion,
                   msecs_to_jiffies(FTS_TIMEOUT_COMERR_PM));
         if (!ret) {
             FTS_ERROR("Bus don't resume from pm(deep),timeout,skip irq");
+            __pm_relax(ts_data->p_ws);
             return IRQ_HANDLED;
         }
     }
 #endif
 
-    if (ts_data->pm_suspend)
-        __pm_stay_awake(ts_data->p_ws);
 
 /*
     if (ts_data->fhp_mode) {
@@ -2090,8 +2090,6 @@ static int fts_ts_resume(struct device *dev)
     struct fts_ts_data *ts_data = fts_data;
 
     FTS_FUNC_ENTER();
-    ts_data->lcd_status = 1;
-    ts_data->resume_time = ktime_get();
     if (!ts_data->suspended) {
         FTS_DEBUG("Already in awake state");
         return 0;
@@ -2102,12 +2100,23 @@ static int fts_ts_resume(struct device *dev)
         return 0;
     }
 
-    ts_data->suspended = false;
+#if IS_ENABLED(CONFIG_PM) && FTS_PATCH_COMERR_PM
+    if (smp_load_acquire(&ts_data->pm_suspend)) {
+        int ret = wait_for_completion_timeout(&ts_data->pm_completion,
+                  msecs_to_jiffies(FTS_TIMEOUT_COMERR_PM));
+        if (!ret || smp_load_acquire(&ts_data->pm_suspend))
+            return -EBUSY;
+    }
+#endif
+
+    ts_data->lcd_status = 1;
+    ts_data->resume_time = ktime_get();
     fts_release_all_finger();
 #if FTS_PSENSOR_EN
     if (ts_data->proximity_mode) {
         fts_wait_tp_to_valid();
         fts_proximity_resume(ts_data);
+        ts_data->suspended = false;
         fts_esdcheck_resume(ts_data);
         if (ts_data->gesture_support || ts_data->single_tap_enabled || ts_data->fod_mode) fts_gesture_resume(ts_data);
         return 0;
@@ -2135,7 +2144,27 @@ static int fts_ts_resume(struct device *dev)
 
     fts_ex_mode_recovery(ts_data);
     fts_fwdbg_recovery(ts_data);
-    fts_esdcheck_resume(ts_data);
+
+    if (ts_data->pocket_mode) {
+        int ret = fts_write_reg(FTS_REG_POWER_MODE, 0);
+        if (ret < 0) {
+            FTS_ERROR("exit pocket mode on resume failed,ret:%d", ret);
+            return ret;
+        }
+        ts_data->pocket_mode = DISABLE;
+    }
+
+#if IS_ENABLED(CONFIG_PM) && FTS_PATCH_COMERR_PM
+    mutex_lock(&ts_data->bus_lock);
+    if (smp_load_acquire(&ts_data->pm_suspend)) {
+        mutex_unlock(&ts_data->bus_lock);
+        return -EBUSY;
+    }
+    ts_data->suspended = false;
+    mutex_unlock(&ts_data->bus_lock);
+#else
+    ts_data->suspended = false;
+#endif
 
     if (ts_data->need_work_in_suspend) {
         if (disable_irq_wake(ts_data->irq)) {
@@ -2144,10 +2173,8 @@ static int fts_ts_resume(struct device *dev)
     } else {
         fts_irq_enable();
     }
-    if (ts_data->pocket_mode) {
-        fts_write_reg(FTS_REG_POWER_MODE, 0);
-        ts_data->pocket_mode = DISABLE;
-    }
+
+    fts_esdcheck_resume(ts_data);
 
     FTS_FUNC_EXIT();
     return 0;
@@ -2156,7 +2183,9 @@ static int fts_ts_resume(struct device *dev)
 static void fts_resume_work(struct work_struct *work)
 {
     struct fts_ts_data *ts_data = container_of(work, struct fts_ts_data, resume_work);
-    fts_ts_resume(ts_data->dev);
+    int ret = fts_ts_resume(ts_data->dev);
+    if (ret < 0)
+        FTS_ERROR("display resume failed,ret:%d", ret);
 }
 
 #if IS_ENABLED(CONFIG_DRM)
@@ -2360,6 +2389,10 @@ int fts_ts_probe_entry(struct fts_ts_data *ts_data)
     ts_data->probe_time = ktime_get();
     FTS_INFO("version:%s", FTS_DRIVER_VERSION);
     fts_data = ts_data;
+#if IS_ENABLED(CONFIG_PM) && FTS_PATCH_COMERR_PM
+    init_completion(&ts_data->pm_completion);
+    ts_data->pm_suspend = false;
+#endif
     ts_data->pdata = kzalloc(sizeof(struct fts_ts_platform_data), GFP_KERNEL);
     if (!ts_data->pdata) {
         FTS_ERROR("allocate memory for platform_data fail");
@@ -2496,10 +2529,6 @@ int fts_ts_probe_entry(struct fts_ts_data *ts_data)
         FTS_ERROR("init fw upgrade fail");
     }
 
-#if IS_ENABLED(CONFIG_PM) && FTS_PATCH_COMERR_PM
-    init_completion(&ts_data->pm_completion);
-    ts_data->pm_suspend = false;
-#endif
 
     ret = fts_notifier_callback_init(ts_data);
     if (ret) {
