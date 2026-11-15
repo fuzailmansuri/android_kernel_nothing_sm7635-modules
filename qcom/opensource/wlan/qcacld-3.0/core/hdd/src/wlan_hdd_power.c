@@ -2621,6 +2621,7 @@ static int __wlan_hdd_cfg80211_suspend_wlan(struct wiphy *wiphy,
 	if (ucfg_pmo_suspend_all_components(hdd_ctx->psoc,
 					    QDF_SYSTEM_SUSPEND)) {
 		hdd_err("Some components not ready to suspend!");
+		hdd_unpause_ns(hdd_ctx);
 		return -EAGAIN;
 	}
 

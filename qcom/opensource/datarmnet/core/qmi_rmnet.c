@@ -630,12 +630,6 @@ qmi_rmnet_setup_client(void *port, struct qmi_info *qmi, struct tcmsg *tcm)
 			return -ENOMEM;
 
 		rmnet_init_qmi_pt(port, qmi);
-		/* pm-register is only needed once when first client is setup
-		 * and not per client
-		 */
-		((struct rmnet_port *)port)->dfc_pm_notifier.notifier_call
-					 = qmi_rmnet_pm_notify_cb;
-		register_pm_notifier(&(((struct rmnet_port *)port)->dfc_pm_notifier));
 	}
 
 	qmi->flag = tcm->tcm_ifindex;
@@ -1514,6 +1508,10 @@ void qmi_rmnet_work_init(void *port)
 	rmnet_work_quit = false;
 	qmi_rmnet_work_set_active(rmnet_work->port, 0);
 	rmnet_work_inited = true;
+	/* The suspend callback must not run before its work exists. */
+	((struct rmnet_port *)port)->dfc_pm_notifier.notifier_call =
+		qmi_rmnet_pm_notify_cb;
+	register_pm_notifier(&(((struct rmnet_port *)port)->dfc_pm_notifier));
 }
 EXPORT_SYMBOL(qmi_rmnet_work_init);
 
