@@ -14,6 +14,7 @@
 #include <dsp/spf-core.h>
 #include <linux/of_device.h>
 #include <linux/sysfs.h>
+#include <linux/completion.h>
 #include <linux/workqueue.h>
 #include <linux/nvmem-consumer.h>
 #include <linux/slab.h>
@@ -49,6 +50,8 @@ struct adsp_loader_private {
 	struct attribute_group *attr_group;
 	char *adsp_fw_name;
 	char *adsp_dtb_name;
+	struct completion probe_complete;
+	bool sysfs_ready;
 };
 
 static struct kobj_attribute adsp_boot_attribute =
@@ -81,8 +84,8 @@ static void adsp_load_fw(struct work_struct *adsp_ldr_work)
 	struct rproc *rproc;
 
 	if (!pdev) {
-		dev_err(&pdev->dev, "%s: Platform device null\n", __func__);
-		goto fail;
+		pr_err("%s: Platform device null\n", __func__);
+		return;
 	}
 
 	if (!pdev->dev.of_node) {
@@ -97,6 +100,10 @@ static void adsp_load_fw(struct work_struct *adsp_ldr_work)
 		" %s: Private data get failed\n", __func__);
 		goto fail;
 	}
+	/* A boot store can run before sysfs_create_group() finishes. */
+	wait_for_completion(&priv->probe_complete);
+	if (!READ_ONCE(priv->sysfs_ready))
+		return;
 
 	rc = of_property_read_u32(pdev->dev.of_node, adsp_dt, &adsp_state);
 	if (rc) {
@@ -207,6 +214,8 @@ static ssize_t adsp_ssr_store(struct kobject *kobj,
 	priv = platform_get_drvdata(pdev);
 	if (!priv)
 		return -EINVAL;
+	if (!READ_ONCE(priv->sysfs_ready))
+		return -EAGAIN;
 
 	if (kstrtoint(buf, 10, &ssr_command) < 0)
 		return -EINVAL;
@@ -233,6 +242,7 @@ static ssize_t adsp_boot_store(struct kobject *kobj,
 	size_t count)
 {
 	int boot = 0;
+	struct adsp_loader_private *priv;
 
 	if (sscanf(buf, "%du", &boot) != 1) {
 		pr_err("%s: failed to read boot info from string\n", __func__);
@@ -243,6 +253,10 @@ static ssize_t adsp_boot_store(struct kobject *kobj,
 		pr_debug("%s: going to call adsp_loader_do\n", __func__);
 		adsp_loader_do(adsp_private);
 	} else if (boot == IMAGE_UNLOAD_CMD) {
+		priv = platform_get_drvdata(adsp_private);
+
+		if (!READ_ONCE(priv->sysfs_ready))
+			return -EAGAIN;
 		pr_debug("%s: going to call adsp_unloader\n", __func__);
 		adsp_loader_unload(adsp_private);
 	}
@@ -276,6 +290,7 @@ static int adsp_loader_init_sysfs(struct platform_device *pdev)
 	}
 
 	platform_set_drvdata(pdev, priv);
+	init_completion(&priv->probe_complete);
 
 	priv->pil_h = NULL;
 	priv->boot_adsp_obj = NULL;
@@ -297,21 +312,12 @@ static int adsp_loader_init_sysfs(struct platform_device *pdev)
 		goto error_return;
 	}
 
-	ret = sysfs_create_group(priv->boot_adsp_obj, priv->attr_group);
-	if (ret) {
-		dev_err(&pdev->dev, "%s: sysfs create group failed %d\n",
-							__func__, ret);
-		goto error_return;
-	}
-
-	adsp_private = pdev;
-
 	return 0;
 
 error_return:
 
 	if (priv->boot_adsp_obj) {
-		kobject_del(priv->boot_adsp_obj);
+		kobject_put(priv->boot_adsp_obj);
 		priv->boot_adsp_obj = NULL;
 	}
 
@@ -327,15 +333,18 @@ static int adsp_loader_remove(struct platform_device *pdev)
 	if (!priv)
 		return 0;
 
+	if (priv->boot_adsp_obj) {
+		sysfs_remove_group(priv->boot_adsp_obj, priv->attr_group);
+		kobject_put(priv->boot_adsp_obj);
+		priv->boot_adsp_obj = NULL;
+	}
+	WRITE_ONCE(priv->sysfs_ready, false);
+	cancel_work_sync(&adsp_ldr_work);
+	adsp_private = NULL;
+
 	if (priv->pil_h) {
 		rproc_shutdown(priv->pil_h);
 		priv->pil_h = NULL;
-	}
-
-	if (priv->boot_adsp_obj) {
-		sysfs_remove_group(priv->boot_adsp_obj, priv->attr_group);
-		kobject_del(priv->boot_adsp_obj);
-		priv->boot_adsp_obj = NULL;
 	}
 
 	return 0;
@@ -507,6 +516,8 @@ static int adsp_loader_probe(struct platform_device *pdev)
 
 	adsp_dtb_fw_name_array = devm_kzalloc(&pdev->dev,
 				adsp_fw_cnt * sizeof(char *), GFP_KERNEL);
+	if (!adsp_dtb_fw_name_array)
+		goto wqueue;
 
 	/* Read ADSP dtb firmware image names */
 	ret = of_property_read_string_array(pdev->dev.of_node,
@@ -547,8 +558,24 @@ wqueue:
 		devm_kfree(&pdev->dev, adsp_fw_bit_values);
 	if (adsp_fw_name_array)
 		devm_kfree(&pdev->dev, adsp_fw_name_array);
+	if (adsp_dtb_fw_name_array)
+		devm_kfree(&pdev->dev, adsp_dtb_fw_name_array);
 
-	return 0;
+	adsp_private = pdev;
+	ret = sysfs_create_group(priv->boot_adsp_obj, priv->attr_group);
+	WRITE_ONCE(priv->sysfs_ready, !ret);
+	complete_all(&priv->probe_complete);
+	if (ret) {
+		dev_err(&pdev->dev, "%s: sysfs create group failed %d\n",
+			__func__, ret);
+		kobject_put(priv->boot_adsp_obj);
+		priv->boot_adsp_obj = NULL;
+		cancel_work_sync(&adsp_ldr_work);
+		adsp_private = NULL;
+		rproc_put(adsp);
+	}
+
+	return ret;
 
 }
 

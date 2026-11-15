@@ -109,6 +109,7 @@ struct audio_pkt_priv {
 
 	struct mutex lock;
 	enum audio_pkt_state status;
+	unsigned int reset_count;
 };
 
 static struct audio_pkt_priv *ap_priv;
@@ -249,6 +250,7 @@ ssize_t audio_pkt_read(struct file *file, char __user *buf,
 	struct sk_buff *skb;
 	int use;
 	uint32_t *temp;
+	unsigned int reset_count;
 
 	if (!audpkt_dev) {
 		AUDIO_PKT_ERR("invalid device handle\n");
@@ -262,6 +264,7 @@ ssize_t audio_pkt_read(struct file *file, char __user *buf,
 		AUDIO_PKT_ERR("dev is in reset\n");
 		return -ENETRESET;
 	}
+	reset_count = ap_priv->reset_count;
 	mutex_unlock(&ap_priv->lock);
 
 	spin_lock_irqsave(&audpkt_dev->queue_lock, flags);
@@ -274,8 +277,14 @@ ssize_t audio_pkt_read(struct file *file, char __user *buf,
 
 		/* Wait until we get data or the endpoint goes away */
 		if (wait_event_interruptible(audpkt_dev->readq,
-					!skb_queue_empty(&audpkt_dev->queue)))
+					!skb_queue_empty(&audpkt_dev->queue) ||
+					READ_ONCE(ap_priv->reset_count) != reset_count ||
+					READ_ONCE(ap_priv->status) != AUDIO_PKT_PROBED))
 			return -ERESTARTSYS;
+
+		if (READ_ONCE(ap_priv->reset_count) != reset_count ||
+		    READ_ONCE(ap_priv->status) != AUDIO_PKT_PROBED)
+			return -ENETRESET;
 
 		spin_lock_irqsave(&audpkt_dev->queue_lock, flags);
 	}
@@ -403,7 +412,12 @@ ssize_t audio_pkt_write(struct file *file, const char __user *buf,
 		mutex_unlock(&audpkt_dev->lock);
 		goto free_kbuf;
 	}
-	ret = gpr_send_pkt(ap_priv->adev,(struct gpr_pkt *) kbuf);
+	mutex_lock(&ap_priv->lock);
+	if (ap_priv->status == AUDIO_PKT_PROBED)
+		ret = gpr_send_pkt(ap_priv->adev, (struct gpr_pkt *)kbuf);
+	else
+		ret = -ENETRESET;
+	mutex_unlock(&ap_priv->lock);
 	if (ret < 0) {
 		AUDIO_PKT_ERR("APR Send Packet Failed ret -%d\n", ret);
 		if (ret == -ECONNRESET)
@@ -437,6 +451,9 @@ static unsigned int audio_pkt_poll(struct file *file, poll_table *wait)
 	}
 
 	poll_wait(file, &audpkt_dev->readq, wait);
+	if (READ_ONCE(ap_priv->status) != AUDIO_PKT_PROBED)
+		return POLLERR;
+
 	mutex_lock(&audpkt_dev->lock);
 
 	spin_lock_irqsave(&audpkt_dev->queue_lock, flags);
@@ -512,7 +529,7 @@ static int audio_pkt_probe(struct gpr_device *adev)
 	{
 		mutex_lock(&ap_priv->lock);
 		ap_priv->adev = adev;
-		ap_priv->status = AUDIO_PKT_PROBED;
+		WRITE_ONCE(ap_priv->status, AUDIO_PKT_PROBED);
 		mutex_unlock(&ap_priv->lock);
 
 		dev_set_drvdata(&adev->dev, ap_priv);
@@ -547,8 +564,11 @@ static int audio_pkt_remove(struct gpr_device *adev)
 	{
 		mutex_lock(&ap_priv->lock);
 		ap_priv->adev = NULL;
-		ap_priv->status = AUDIO_PKT_REMOVED;
+		WRITE_ONCE(ap_priv->status, AUDIO_PKT_REMOVED);
+		/* Retain reset detection if the endpoint reprobes before a reader runs. */
+		WRITE_ONCE(ap_priv->reset_count, ap_priv->reset_count + 1);
 		mutex_unlock(&ap_priv->lock);
+		wake_up_interruptible(&ap_priv->ap_dev->readq);
 		dev_dbg(&adev->dev, "%s: Driver[%s] Removing\n",
 		 __func__, adev->name);
 		dev_set_drvdata(&adev->dev, NULL);
@@ -661,18 +681,21 @@ static int audio_pkt_platform_driver_probe(struct platform_device *pdev)
 	cdev_init(&audpkt_dev->cdev, &audio_pkt_fops);
 	audpkt_dev->cdev.owner = THIS_MODULE;
 
+	ret = audio_pkt_plaform_driver_register_gpr(pdev, audpkt_dev);
+	if (ret < 0) {
+		dev_err(&pdev->dev, "%s: Failed to register with gpr, err = %d\n",
+			__func__, ret);
+		goto free_dev;
+	}
+
 	ret = cdev_add(&audpkt_dev->cdev, audpkt_dev->audio_pkt_major,
 		       MINOR_NUMBER_COUNT);
 	if (ret) {
 		AUDIO_PKT_ERR("cdev_add failed for %s ret:%d\n",
 			      audpkt_dev->dev_name, ret);
-		goto free_dev;
-	}
-
-	ret = audio_pkt_plaform_driver_register_gpr(pdev, audpkt_dev);
-	if (ret < 0) {
-		dev_err(&pdev->dev, "%s: Failed to register with gpr, err = %d\n",
-			__func__, ret);
+		gpr_driver_unregister(&audio_pkt_driver);
+		skb_queue_purge(&audpkt_dev->queue);
+		mutex_destroy(&ap_priv->lock);
 		goto free_dev;
 	}
 
@@ -687,7 +710,7 @@ free_dev:
 err_device:
 	class_destroy(audpkt_dev->audio_pkt_class);
 err_class:
-	unregister_chrdev_region(MAJOR(audpkt_dev->audio_pkt_major),
+	unregister_chrdev_region(audpkt_dev->audio_pkt_major,
 				 MINOR_NUMBER_COUNT);
 err_chrdev:
 done:
@@ -718,7 +741,7 @@ static int audio_pkt_platform_driver_remove(struct platform_device *adev)
 		cdev_del(&audpkt_dev->cdev);
 		device_destroy(audpkt_dev->audio_pkt_class,audpkt_dev->audio_pkt_major);
 		class_destroy(audpkt_dev->audio_pkt_class);
-		unregister_chrdev_region(MAJOR(audpkt_dev->audio_pkt_major),
+		unregister_chrdev_region(audpkt_dev->audio_pkt_major,
 				 MINOR_NUMBER_COUNT);
 	}
 	mutex_destroy(&ap_priv->lock);

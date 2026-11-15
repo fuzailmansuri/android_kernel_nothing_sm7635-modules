@@ -22,6 +22,7 @@
 #include <ipc/gpr-lite.h>
 #include <linux/rpmsg.h>
 #include <linux/of.h>
+#include <linux/srcu.h>
 
 #include <soc/snd_event.h>
 #include <dsp/audio_notifier.h>
@@ -44,6 +45,7 @@ struct gpr {
 
 static struct gpr_q6 q6;
 static struct gpr *gpr_priv;
+DEFINE_STATIC_SRCU(gpr_callback_srcu);
 
 enum gpr_subsys_state gpr_get_q6_state(void)
 {
@@ -284,6 +286,7 @@ static int gpr_callback(struct rpmsg_device *rpdev, void *buf,
 	struct gpr_hdr *hdr;
 	unsigned long flags;
 	//uint32_t opcode_type;
+	int srcu_idx;
 
 	if (len <= GPR_HDR_SIZE) {
 		dev_err_ratelimited(gpr->dev, "GPR: Improper gpr pkt received:%p %d\n",
@@ -316,6 +319,7 @@ static int gpr_callback(struct rpmsg_device *rpdev, void *buf,
 		pm_wakeup_ws_event(gpr_priv->wsource, WAKELOCK_TIMEOUT, true);
 	}
 	svc_id = hdr->dst_port;
+	srcu_idx = srcu_read_lock(&gpr_callback_srcu);
 	spin_lock_irqsave(&gpr->svcs_lock, flags);
 	svc = idr_find(&gpr->svcs_idr, svc_id);
 	if (svc && svc->dev.driver) {
@@ -327,8 +331,8 @@ static int gpr_callback(struct rpmsg_device *rpdev, void *buf,
 			adrv = to_gpr_driver(svc->dev.driver);
 	}
 	spin_unlock_irqrestore(&gpr->svcs_lock, flags);
-
 	if (!adrv) {
+		srcu_read_unlock(&gpr_callback_srcu, srcu_idx);
 		dev_err_ratelimited(gpr->dev, "GPR: service is not registered\n");
 		if (hdr->opcode == APM_EVENT_MODULE_TO_CLIENT)
 			__pm_relax(gpr_priv->wsource);
@@ -341,6 +345,7 @@ static int gpr_callback(struct rpmsg_device *rpdev, void *buf,
 	 */
 
 	adrv->callback(svc, buf);
+	srcu_read_unlock(&gpr_callback_srcu, srcu_idx);
 
 	return 0;
 }
@@ -372,8 +377,25 @@ static int gpr_device_probe(struct device *dev)
 {
 	struct gpr_device *adev = to_gpr_device(dev);
 	struct gpr_driver *adrv = to_gpr_driver(dev->driver);
+	struct gpr *gpr = dev_get_drvdata(dev->parent);
+	unsigned long flags;
+	int ret;
 
-	return adrv->probe(adev);
+	ret = adrv->probe(adev);
+	if (ret)
+		return ret;
+
+	spin_lock_irqsave(&gpr->svcs_lock, flags);
+	ret = idr_alloc(&gpr->svcs_idr, adev, adev->svc_id,
+			adev->svc_id + 1, GFP_ATOMIC);
+	spin_unlock_irqrestore(&gpr->svcs_lock, flags);
+	if (ret < 0) {
+		if (adrv->remove)
+			adrv->remove(adev);
+		return ret;
+	}
+
+	return 0;
 }
 
 static void gpr_device_remove(struct device *dev)
@@ -385,11 +407,13 @@ static void gpr_device_remove(struct device *dev)
 
 	if (dev->driver) {
 		adrv = to_gpr_driver(dev->driver);
-		if (adrv->remove)
-			adrv->remove(adev);
 		spin_lock_irqsave(&gpr->svcs_lock, flags);
 		idr_remove(&gpr->svcs_idr, adev->svc_id);
 		spin_unlock_irqrestore(&gpr->svcs_lock, flags);
+		/* Drain callbacks selected before the service left the lookup table. */
+		synchronize_srcu(&gpr_callback_srcu);
+		if (adrv->remove)
+			adrv->remove(adev);
 	}
 
 	return;
@@ -422,7 +446,6 @@ static int gpr_add_device(struct device *dev, struct device_node *np,
 	struct gpr *gpr = dev_get_drvdata(dev);
 	struct gpr_device *adev = NULL;
 	int ret;
-	unsigned long flags;
 
 	adev = kzalloc(sizeof(*adev), GFP_KERNEL);
 	if (!adev)
@@ -446,11 +469,6 @@ static int gpr_add_device(struct device *dev, struct device_node *np,
 	adev->dev.of_node = np;
 	adev->dev.release = gpr_dev_release;
 	adev->dev.driver = NULL;
-
-	spin_lock_irqsave(&gpr->svcs_lock, flags);
-	idr_alloc(&gpr->svcs_idr, adev, id->svc_id,
-		  id->svc_id + 1, GFP_ATOMIC);
-	spin_unlock_irqrestore(&gpr->svcs_lock, flags);
 
 	dev_info_ratelimited(dev, "Adding GPR dev: %s\n", dev_name(&adev->dev));
 
@@ -575,7 +593,7 @@ static void gpr_remove(struct rpmsg_device *rpdev)
 {
 	struct device *dev = &rpdev->dev;
 
-	wakeup_source_unregister(gpr_priv->wsource);
+	cancel_work_sync(&gpr_priv->notifier_reg_work);
 	snd_event_client_deregister(&rpdev->dev);
 	dev_info(dev, "%s: deregistering via subsys_notif_register for domain_id(%d)",
 		__func__, gpr_priv->dest_domain_id );
@@ -588,6 +606,11 @@ static void gpr_remove(struct rpmsg_device *rpdev)
 		gpr_subsys_notif_deregister("gpr_modem");
 	}
 	device_for_each_child(&rpdev->dev, NULL, gpr_remove_device);
+	if (rpdev->ept) {
+		rpmsg_destroy_ept(rpdev->ept);
+		rpdev->ept = NULL;
+	}
+	wakeup_source_unregister(gpr_priv->wsource);
 }
 
 /*
