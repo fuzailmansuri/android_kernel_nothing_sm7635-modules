@@ -1280,7 +1280,9 @@ static int fts_read_parse_touchdata(struct fts_ts_data *ts_data, u8 *touch_buf)
         fts_read_reg(FTS_REG_FOD_MODE_EN, &fod_state);
         if(fod_state == FTS_VAL_FOD_ENABLE) {
             if (fts_fod_readdata(ts_data) == FTS_RETVAL_IGNORE_TOUCHES) {
-                fts_fod_report_key(ts_data);
+                if (!ts_data->suspended || ts_data->fts_fod_enabled) {
+                    fts_fod_report_key(ts_data);
+                }
                 if (ts_data->suspended) {
                 return TOUCH_IGNORE;
                 }
