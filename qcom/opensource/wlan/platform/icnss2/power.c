@@ -1084,6 +1084,7 @@ int icnss_get_psf_info(struct icnss_priv *priv)
 		goto out;
 	}
 
+	INIT_WORK(&priv->soc_update_work, icnss_update_soc_level);
 	priv->psf_nb.notifier_call = icnss_battery_supply_callback;
 	ret = power_supply_reg_notifier(&priv->psf_nb);
 	if (ret < 0) {
@@ -1092,12 +1093,11 @@ int icnss_get_psf_info(struct icnss_priv *priv)
 		goto err_psf_registration;
 	}
 
-	INIT_WORK(&priv->soc_update_work, icnss_update_soc_level);
-
 	return 0;
 
 err_psf_registration:
 	destroy_workqueue(priv->soc_update_wq);
+	priv->soc_update_wq = NULL;
 out:
 	return ret;
 }

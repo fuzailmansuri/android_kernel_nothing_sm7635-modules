@@ -1146,6 +1146,7 @@ static int icnss_driver_event_server_arrive(struct icnss_priv *priv,
 	int ret = 0;
 	int temp = 0;
 	bool ignore_assert = false;
+	unsigned long flags;
 	enum wlfw_wlan_rf_subtype_v01 rf_subtype;
 
 	if (!priv)
@@ -1336,8 +1337,10 @@ static int icnss_driver_event_server_arrive(struct icnss_priv *priv,
 	if (!priv->fw_early_crash_irq)
 		register_early_crash_notifications(&priv->pdev->dev);
 
+	spin_lock_irqsave(&priv->event_lock, flags);
 	if (priv->psf_supported)
 		queue_work(priv->soc_update_wq, &priv->soc_update_work);
+	spin_unlock_irqrestore(&priv->event_lock, flags);
 
 	return ret;
 
@@ -1358,7 +1361,7 @@ static int icnss_driver_event_server_exit(struct icnss_priv *priv)
 
 	icnss_clear_server(priv);
 
-	if (priv->psf_supported)
+	if (READ_ONCE(priv->psf_supported))
 		priv->last_updated_voltage = 0;
 
 	return 0;
@@ -5087,6 +5090,8 @@ static const char *icnss_get_device_name(const struct platform_device_id *device
 	return "UNKNOWN";
 }
 
+static void icnss_unregister_power_supply_notifier(struct icnss_priv *priv);
+
 static int icnss_probe(struct platform_device *pdev)
 {
 	int ret = 0;
@@ -5104,8 +5109,7 @@ static int icnss_probe(struct platform_device *pdev)
 	of_id = of_match_device(icnss_dt_match, &pdev->dev);
 	if (!of_id || !of_id->data) {
 		icnss_pr_err("Failed to find of match device!\n");
-		ret = -ENODEV;
-		goto out_reset_drvdata;
+		return -ENODEV;
 	}
 
 	device_id = of_id->data;
@@ -5124,6 +5128,7 @@ static int icnss_probe(struct platform_device *pdev)
 	priv->is_chain1_supported = true;
 	INIT_LIST_HEAD(&priv->vreg_list);
 	INIT_LIST_HEAD(&priv->clk_list);
+	spin_lock_init(&priv->event_lock);
 	icnss_allow_recursive_recovery(dev);
 
 	icnss_initialize_mem_pool(priv->device_id);
@@ -5148,7 +5153,6 @@ static int icnss_probe(struct platform_device *pdev)
 	if (ret)
 		goto unreg_bus_scale;
 
-	spin_lock_init(&priv->event_lock);
 	spin_lock_init(&priv->on_off_lock);
 	spin_lock_init(&priv->soc_wake_msg_lock);
 	mutex_init(&priv->dev_lock);
@@ -5243,9 +5247,11 @@ static int icnss_probe(struct platform_device *pdev)
 	return 0;
 
 out_unregister_fw_service:
+	icnss_unregister_power_supply_notifier(priv);
 	icnss_unregister_fw_service(priv);
 out_destroy_wq:
 	destroy_workqueue(priv->event_wq);
+	priv->event_wq = NULL;
 smmu_cleanup:
 	priv->iommu_domain = NULL;
 unreg_bus_scale:
@@ -5253,6 +5259,7 @@ unreg_bus_scale:
 out_free_resources:
 	icnss_put_resources(priv);
 out_reset_drvdata:
+	icnss_unregister_power_supply_notifier(priv);
 	icnss_deinitialize_mem_pool();
 	dev_set_drvdata(dev, NULL);
 	return ret;
@@ -5273,13 +5280,21 @@ static void icnss_destroy_ramdump_device(struct icnss_ramdump_info *ramdump_info
 
 static void icnss_unregister_power_supply_notifier(struct icnss_priv *priv)
 {
-	if (priv->batt_psy)
-		power_supply_put(penv->batt_psy);
+	unsigned long flags;
 
 	if (priv->psf_supported) {
-		flush_workqueue(priv->soc_update_wq);
-		destroy_workqueue(priv->soc_update_wq);
 		power_supply_unreg_notifier(&priv->psf_nb);
+		/* Stop firmware events from queueing battery work during teardown. */
+		spin_lock_irqsave(&priv->event_lock, flags);
+		WRITE_ONCE(priv->psf_supported, false);
+		spin_unlock_irqrestore(&priv->event_lock, flags);
+		destroy_workqueue(priv->soc_update_wq);
+		priv->soc_update_wq = NULL;
+	}
+
+	if (priv->batt_psy) {
+		power_supply_put(priv->batt_psy);
+		priv->batt_psy = NULL;
 	}
 }
 
@@ -5304,7 +5319,7 @@ static void icnss_remove(struct platform_device *pdev)
 
 	icnss_debugfs_destroy(priv);
 
-	icnss_unregister_power_supply_notifier(penv);
+	icnss_unregister_power_supply_notifier(priv);
 
 	icnss_sysfs_destroy(priv);
 
