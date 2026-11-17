@@ -2051,6 +2051,8 @@ int ipa_teardown_sys_pipe(u32 clnt_hdl)
 		napi_disable(&ep->sys->napi_rx);
 		netif_napi_del(&ep->sys->napi_rx);
 	}
+	if (ep->client == IPA_CLIENT_APPS_WAN_LOW_LAT_CONS)
+		tasklet_kill(&ep->sys->tasklet);
 
 	/*
 	 * Tear down the default pipe before we reset the channel
