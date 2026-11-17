@@ -514,8 +514,6 @@ static ssize_t fts_pocket_mode_store(
     mutex_lock(&ts_data->input_dev->mutex);
 
     FTS_ERROR("pocket mode info:pm_suspend = %d\n", ts_data->pm_suspend);
-    if (READ_ONCE(ts_data->pm_suspend))
-        __pm_stay_awake(ts_data->p_ws);
 
     if (FTS_SYSFS_ECHO_ON(buf)) {
         FTS_ERROR("Pre-pocket_mode = %d, Enter pocket mode", ts_data->pocket_mode);
@@ -544,7 +542,6 @@ static ssize_t fts_pocket_mode_store(
             fts_esdcheck_switch(ts_data, ENABLE);
     }
 out:
-    __pm_relax(ts_data->p_ws);
     mutex_unlock(&ts_data->input_dev->mutex);
 
     if (ret < 0)

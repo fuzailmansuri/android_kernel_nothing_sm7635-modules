@@ -1971,13 +1971,13 @@ static int fts_parse_dt(struct device *dev, struct fts_ts_platform_data *pdata)
         ret = of_property_read_u32(np, "focaltech,key-number", &pdata->key_number);
         if (ret < 0)
             FTS_ERROR("Key number undefined!");
+        if (pdata->key_number > FTS_MAX_KEYS)
+            pdata->key_number = FTS_MAX_KEYS;
 
         ret = of_property_read_u32_array(np, "focaltech,keys",
                                          pdata->keys, pdata->key_number);
         if (ret < 0)
             FTS_ERROR("Keys undefined!");
-        else if (pdata->key_number > FTS_MAX_KEYS)
-            pdata->key_number = FTS_MAX_KEYS;
 
         ret = of_property_read_u32_array(np, "focaltech,key-x-coords",
                                          pdata->key_x_coords,
