@@ -220,7 +220,9 @@ struct fts_ts_data {
     struct fts_ts_platform_data *pdata;
     struct ts_ic_info ic_info;
     struct workqueue_struct *ts_workqueue;
+    struct work_struct suspend_work;
     struct work_struct resume_work;
+    struct work_struct gesture_work;
     struct delayed_work esdcheck_work;
     struct delayed_work prc_work;
     struct delayed_work fwdbg_work;
@@ -378,6 +380,7 @@ int fts_ts_remove_entry(struct fts_ts_data *ts_data);
 int fts_gesture_init(struct fts_ts_data *ts_data);
 int fts_gesture_exit(struct fts_ts_data *ts_data);
 void fts_gesture_recovery(struct fts_ts_data *ts_data);
+void fts_update_gesture_mode(struct fts_ts_data *ts_data);
 int fts_gesture_readdata(struct fts_ts_data *ts_data, u8 *data);
 int fts_gesture_suspend(struct fts_ts_data *ts_data);
 int fts_gesture_resume(struct fts_ts_data *ts_data);

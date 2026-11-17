@@ -2085,6 +2085,14 @@ static int fts_ts_suspend(struct device *dev)
     return 0;
 }
 
+static void fts_suspend_work(struct work_struct *work)
+{
+    struct fts_ts_data *ts_data =
+        container_of(work, struct fts_ts_data, suspend_work);
+
+    fts_ts_suspend(ts_data->dev);
+}
+
 static int fts_ts_resume(struct device *dev)
 {
     struct fts_ts_data *ts_data = fts_data;
@@ -2138,7 +2146,8 @@ static int fts_ts_resume(struct device *dev)
     }
 
     fts_enter_normal_fw();
-    if (ts_data->gesture_support || ts_data->single_tap_enabled || ts_data->fod_mode) {
+    if (ts_data->need_work_in_suspend || ts_data->gesture_support ||
+        ts_data->single_tap_enabled || ts_data->fod_mode) {
         fts_gesture_resume(ts_data);
     }
 
@@ -2186,6 +2195,29 @@ static void fts_resume_work(struct work_struct *work)
     int ret = fts_ts_resume(ts_data->dev);
     if (ret < 0)
         FTS_ERROR("display resume failed,ret:%d", ret);
+}
+
+static void fts_gesture_work(struct work_struct *work)
+{
+    struct fts_ts_data *ts_data =
+        container_of(work, struct fts_ts_data, gesture_work);
+    int ret;
+
+    if (!ts_data->suspended)
+        return;
+
+    /* Reprogram wake gestures on the same queue as panel power transitions. */
+    ret = fts_ts_resume(ts_data->dev);
+    if (ret < 0) {
+        FTS_ERROR("gesture reconfiguration failed,ret:%d", ret);
+        return;
+    }
+    fts_ts_suspend(ts_data->dev);
+}
+
+void fts_update_gesture_mode(struct fts_ts_data *ts_data)
+{
+    queue_work(ts_data->ts_workqueue, &ts_data->gesture_work);
 }
 
 #if IS_ENABLED(CONFIG_DRM)
@@ -2251,10 +2283,11 @@ static int fb_notifier_callback(struct notifier_block *self, unsigned long event
 #endif //CONFIG_DRM
         FTS_INFO("notifier,event:%lu,blank:%d", event, blank_value);
         if ((blank_enum[1] == blank_value) && (event_enum[1] == event)) {
+            cancel_work_sync(&fts_data->suspend_work);
             queue_work(fts_data->ts_workqueue, &fts_data->resume_work);
         } else if ((blank_enum[0] == blank_value) && (event_enum[0] == event)) {
             cancel_work_sync(&fts_data->resume_work);
-            fts_ts_suspend(ts_data->dev);
+            queue_work(fts_data->ts_workqueue, &fts_data->suspend_work);
         } else {
             FTS_DEBUG("notifier,event:%lu,blank:%d, not care", event, blank_value);
         }
@@ -2274,6 +2307,7 @@ static void fts_panel_notifier_callback(enum panel_event_notifier_tag tag,
 
     if (!notification) {
         FTS_ERROR("Invalid notification\n");
+        return;
     }
 
 	FTS_DEBUG("Notification type:%d, early_trigger:%d, esd_recoverying:%d\n",
@@ -2290,13 +2324,15 @@ static void fts_panel_notifier_callback(enum panel_event_notifier_tag tag,
     case DRM_PANEL_EVENT_UNBLANK:
         if (notification->notif_data.early_trigger)
             FTS_DEBUG("resume notification pre commit\n");
-        else
-            queue_work(fts_data->ts_workqueue, &fts_data->resume_work);
+        else {
+            cancel_work_sync(&ts_data->suspend_work);
+            queue_work(ts_data->ts_workqueue, &ts_data->resume_work);
+        }
         break;
     case DRM_PANEL_EVENT_BLANK:
         if (notification->notif_data.early_trigger) {
             cancel_work_sync(&fts_data->resume_work);
-            fts_ts_suspend(ts_data->dev);
+            queue_work(ts_data->ts_workqueue, &ts_data->suspend_work);
         } else {
             FTS_DEBUG("suspend notification post commit\n");
         }
@@ -2304,7 +2340,7 @@ static void fts_panel_notifier_callback(enum panel_event_notifier_tag tag,
     case DRM_PANEL_EVENT_BLANK_LP:
         FTS_DEBUG("received lp event\n");
         cancel_work_sync(&fts_data->resume_work);
-        fts_ts_suspend(ts_data->dev);
+        queue_work(ts_data->ts_workqueue, &ts_data->suspend_work);
         break;
     case DRM_PANEL_EVENT_FPS_CHANGE:
         FTS_DEBUG("shashank:Received fps change old fps:%d new fps:%d\n",
@@ -2407,8 +2443,12 @@ int fts_ts_probe_entry(struct fts_ts_data *ts_data)
     ts_data->ts_workqueue = create_singlethread_workqueue("fts_wq");
     if (!ts_data->ts_workqueue) {
         FTS_ERROR("create fts workqueue fail");
+        kfree_safe(ts_data->pdata);
+        return -ENOMEM;
     } else {
+        INIT_WORK(&ts_data->suspend_work, fts_suspend_work);
         INIT_WORK(&ts_data->resume_work, fts_resume_work);
+        INIT_WORK(&ts_data->gesture_work, fts_gesture_work);
     }
     spin_lock_init(&ts_data->irq_lock);
     mutex_init(&ts_data->report_mutex);
@@ -2541,16 +2581,20 @@ int fts_ts_probe_entry(struct fts_ts_data *ts_data)
     return 0;
 
 err_irq_req:
+    fts_remove_sysfs(ts_data);
+    fts_gesture_exit(ts_data);
+    fts_procfs_exit();
+    cancel_work_sync(&ts_data->gesture_work);
+    cancel_work_sync(&ts_data->suspend_work);
+    cancel_work_sync(&ts_data->resume_work);
     fts_esdcheck_exit(ts_data);
 #if FTS_PSENSOR_EN
     fts_proximity_exit(ts_data);
 #endif
-    fts_gesture_exit(ts_data);
     fts_ex_mode_exit(ts_data);
     fts_point_report_check_exit(ts_data);
     //fts_fhp_exit(ts_data);
     fts_fwdbg_exit(ts_data);
-    fts_remove_sysfs(ts_data);
     fts_release_apk_debug_channel(ts_data);
     input_unregister_device(ts_data->input_dev);
 #if FTS_PEN_EN
@@ -2582,6 +2626,8 @@ err_bus_init:
 #else
     wakeup_source_unregister(ts_data->p_ws);
 #endif
+    cancel_work_sync(&ts_data->gesture_work);
+    cancel_work_sync(&ts_data->suspend_work);
     cancel_work_sync(&ts_data->resume_work);
     if (ts_data->ts_workqueue) destroy_workqueue(ts_data->ts_workqueue);
     kfree_safe(ts_data->bus_tx_buf);
@@ -2595,20 +2641,22 @@ err_bus_init:
 int fts_ts_remove_entry(struct fts_ts_data *ts_data)
 {
     FTS_FUNC_ENTER();
-    cancel_work_sync(&ts_data->resume_work);
     fts_notifier_callback_exit(ts_data);
+    fts_remove_sysfs(ts_data);
+    fts_gesture_exit(ts_data);
+    fts_procfs_exit();
+    cancel_work_sync(&ts_data->gesture_work);
+    cancel_work_sync(&ts_data->suspend_work);
+    cancel_work_sync(&ts_data->resume_work);
     free_irq(ts_data->irq, ts_data);
     fts_fwupg_exit(ts_data);
     fts_esdcheck_exit(ts_data);
 #if FTS_PSENSOR_EN
     fts_proximity_exit(ts_data);
 #endif
-    fts_gesture_exit(ts_data);
     fts_ex_mode_exit(ts_data);
     fts_point_report_check_exit(ts_data);
-    fts_remove_sysfs(ts_data);
     fts_fwdbg_exit(ts_data);
-    fts_procfs_exit();
     fts_release_apk_debug_channel(ts_data);
     //fts_fhp_exit(ts_data);
     input_unregister_device(ts_data->input_dev);

@@ -682,11 +682,6 @@ static ssize_t fts_gesture_store(
     if (kstrtouint(buf, 0, &tmp))
         return -EINVAL;
 
-    if (ts_data->suspended) {
-        FTS_INFO("In suspend,not operation gesture mode!");
-        return count;
-    }
-
     mutex_lock(&ts_data->input_dev->mutex);
     if (FTS_SYSFS_ECHO_ON(buf)) {
         FTS_DEBUG("enable double tap");
@@ -697,6 +692,8 @@ static ssize_t fts_gesture_store(
     }
     ts_data->gesture_support = ts_data->double_tap_enabled || ts_data->single_tap_enabled;
     mutex_unlock(&ts_data->input_dev->mutex);
+
+    fts_update_gesture_mode(ts_data);
 
     return count;
 }
