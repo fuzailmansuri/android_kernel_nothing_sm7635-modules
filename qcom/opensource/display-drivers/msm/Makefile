@@ -1,6 +1,15 @@
 # SPDX-License-Identifier: GPL-2.0
 
+ifeq ($(TARGET_BOARD_PLATFORM),)
+override TARGET_BOARD_PLATFORM := volcano
+endif
+ifeq ($(BOARD_PLATFORM),)
+override BOARD_PLATFORM := $(TARGET_BOARD_PLATFORM)
+endif
+
 KBUILD_OPTIONS+= DISPLAY_ROOT=$(KERNEL_SRC)/$(M)/../
+KBUILD_OPTIONS += BOARD_PLATFORM=$(BOARD_PLATFORM)
+KBUILD_OPTIONS += TARGET_BOARD_PLATFORM=$(TARGET_BOARD_PLATFORM)
 KBUILD_OPTIONS += KBUILD_EXTRA_SYMBOLS+=$(M)/../../mm-drivers/msm_ext_display/Module.symvers
 KBUILD_OPTIONS += KBUILD_EXTRA_SYMBOLS+=$(M)/../../mm-drivers/hw_fence/Module.symvers
 KBUILD_OPTIONS += KBUILD_EXTRA_SYMBOLS+=$(M)/../../mm-drivers/sync_fence/Module.symvers

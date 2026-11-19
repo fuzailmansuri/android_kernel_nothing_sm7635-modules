@@ -70,9 +70,9 @@ ifeq ($(KERNEL_BUILD), 0)
 	endif
 	ifeq ($(BOARD_PLATFORM),)
 		ifeq ($(CONFIG_ARCH_VOLCANO), y)
-			BOARD_PLATFORM := volcano
+			override BOARD_PLATFORM := volcano
 		else ifeq ($(CONFIG_ARCH_PINEAPPLE), y)
-			BOARD_PLATFORM := pineapple
+			override BOARD_PLATFORM := pineapple
 		endif
 	endif
 	ifeq ($(BOARD_PLATFORM), pineapple)
