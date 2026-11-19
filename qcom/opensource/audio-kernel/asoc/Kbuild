@@ -68,6 +68,13 @@ ifeq ($(KERNEL_BUILD), 0)
 		include $(AUDIO_ROOT)/config/kalamaauto.conf
 		INCS    +=  -include $(AUDIO_ROOT)/config/kalamaautoconf.h
 	endif
+	ifeq ($(BOARD_PLATFORM),)
+		ifeq ($(CONFIG_ARCH_VOLCANO), y)
+			BOARD_PLATFORM := volcano
+		else ifeq ($(CONFIG_ARCH_PINEAPPLE), y)
+			BOARD_PLATFORM := pineapple
+		endif
+	endif
 	ifeq ($(BOARD_PLATFORM), pineapple)
 		include $(AUDIO_ROOT)/config/pineappleauto.conf
 		INCS    +=  -include $(AUDIO_ROOT)/config/pineappleautoconf.h
