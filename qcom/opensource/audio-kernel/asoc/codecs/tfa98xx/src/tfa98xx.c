@@ -1782,7 +1782,7 @@ static int tfa98xx_get_stereo_ctl(struct snd_kcontrol *kcontrol,
     mutex_lock(&tfa98xx_mutex);
 	list_for_each_entry(tfa98xx, &tfa98xx_device_list, list) {
 			pr_err("tfa98xx: tfa98xx_get_stereo_ctl %d, 0x%x\n", tfa98xx->flags, tfa98xx->i2c->addr);
-	    	ucontrol->value.integer.value[0] = tfa98xx->flags;
+                ucontrol->value.integer.value[0] = tfa98xx->flags;
 	}
 	mutex_unlock(&tfa98xx_mutex);
 
@@ -4164,7 +4164,7 @@ static int tfa98xx_mute(struct snd_soc_dai *dai, int mute, int stream)
 #endif
 
         if (tfa98xx_device_count > 1) {
-    		bytes_inst0[0] = 0;
+                bytes_inst0[0] = 0;
             bytes_inst1[0] = 0;
             called_count = 0;
         }
@@ -4191,14 +4191,14 @@ static int tfa98xx_mute(struct snd_soc_dai *dai, int mute, int stream)
 		if (stream == SNDRV_PCM_STREAM_PLAYBACK)
 		{
 			tfa98xx->pstream = 1;
-        	/* Start DSP */
+                /* Start DSP */
 #ifdef TFA9894_STEREO
-        	if ((tfa98xx->flags & TFA98XX_FLAG_CHIP_SELECTED) &&
-	   			(tfa98xx->dsp_init != TFA98XX_DSP_INIT_PENDING))
+                if ((tfa98xx->flags & TFA98XX_FLAG_CHIP_SELECTED) &&
+                                (tfa98xx->dsp_init != TFA98XX_DSP_INIT_PENDING))
 #else
             if (tfa98xx->dsp_init != TFA98XX_DSP_INIT_PENDING)
 #endif
-                	tfa98xx_dsp_init(tfa98xx);
+                        tfa98xx_dsp_init(tfa98xx);
 		}else{
 			tfa98xx->cstream = 1;
             return 0;
@@ -6107,4 +6107,3 @@ module_exit(tfa98xx_i2c_exit);
 
 MODULE_DESCRIPTION("ASoC TFA98XX driver");
 MODULE_LICENSE("GPL");
-

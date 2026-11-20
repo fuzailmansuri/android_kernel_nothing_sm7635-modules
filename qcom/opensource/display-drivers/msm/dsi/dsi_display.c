@@ -10,6 +10,7 @@
 #include <linux/err.h>
 #include <linux/version.h>
 #include <linux/ktime.h>
+#include <linux/overflow.h>
 
 #include "msm_drv.h"
 #include "sde_connector.h"
@@ -278,7 +279,8 @@ int dsi_display_set_backlight(struct drm_connector *connector,
 
 	//lp = sde_connector_get_lp(connector);
 	//if (lp == SDE_MODE_DPMS_LP1){
-	if (30 == panel->cur_mode->timing.refresh_rate && panel->update_init_gamma) {
+	if (panel->cur_mode && panel->update_init_gamma &&
+			panel->cur_mode->timing.refresh_rate == 30) {
 		if (2411101 == panel->panel_version ||
 			!strcmp(panel->name, "rm69220 amoled vid mode dsi visionox panel with DSC")) {
 			if (bl_temp >= 1000)
@@ -1389,28 +1391,17 @@ int dsi_display_set_power(struct drm_connector *connector,
 		return -EINVAL;
 	}
 
-	if (display->panel->panel_mode == DSI_OP_VIDEO_MODE) {
-		if (power_mode == SDE_MODE_DPMS_LP1) {
-			if (display->dsi_stay_awake == false) {
-				DSI_INFO("dsi display stay awak\n");
-				__pm_stay_awake(display->wk_lock);
-				display->dsi_stay_awake = true;
-			}
-		} else {
-			if (display->dsi_stay_awake == true) {
-				DSI_INFO("dsi display relax\n");
-				__pm_relax(display->wk_lock);
-				display->dsi_stay_awake = false;
-			}
-		}
-	}
-
 	switch (power_mode) {
 	case SDE_MODE_DPMS_LP1:
 		/*send cmd when switch porch, do nothing here*/
 		//rc = dsi_panel_set_lp1(display->panel);
 		if (display->config.panel_mode == DSI_OP_VIDEO_MODE) {
-			send_refreshrate_cmd(display->panel, display->panel->cur_mode->timing.refresh_rate);
+			if (!display->panel->cur_mode) {
+				rc = -EINVAL;
+				break;
+			}
+			rc = send_refreshrate_cmd(display->panel,
+				display->panel->cur_mode->timing.refresh_rate);
 		}
 		break;
 	case SDE_MODE_DPMS_LP2:
@@ -1425,7 +1416,7 @@ int dsi_display_set_power(struct drm_connector *connector,
 		break;
 	case SDE_MODE_DPMS_OFF:
 	default:
-		return rc;
+		goto update_wake;
 	}
 
 	SDE_EVT32(display->panel->power_mode, power_mode, rc);
@@ -1434,6 +1425,19 @@ int dsi_display_set_power(struct drm_connector *connector,
 			rc ? "failed" : "successful");
 	if (!rc)
 		display->panel->power_mode = power_mode;
+
+update_wake:
+	if (!rc && display->panel->panel_mode == DSI_OP_VIDEO_MODE) {
+		if (power_mode == SDE_MODE_DPMS_LP1) {
+			if (!display->dsi_stay_awake) {
+				__pm_stay_awake(display->wk_lock);
+				display->dsi_stay_awake = true;
+			}
+		} else if (display->dsi_stay_awake) {
+			__pm_relax(display->wk_lock);
+			display->dsi_stay_awake = false;
+		}
+	}
 
 	return rc;
 }
@@ -4365,14 +4369,20 @@ static int dsi_display_res_init(struct dsi_display *display)
 		goto error_panel_put;
 	}
 
+	display->wk_lock = wakeup_source_register(&display->pdev->dev, "dsi_wakelock");
+	if (!display->wk_lock) {
+		rc = -ENOMEM;
+		goto error_panel_put;
+	}
+	display->dsi_stay_awake = false;
+
 	rc = dsi_display_clocks_init(display);
 	if (rc) {
 		DSI_ERR("Failed to parse clock data, rc=%d\n", rc);
+		wakeup_source_unregister(display->wk_lock);
+		display->wk_lock = NULL;
 		goto error_panel_put;
 	}
-
-	display->wk_lock = wakeup_source_register(&display->pdev->dev, "dsi_wakelock");
-	display->dsi_stay_awake = false;
 
 	/**
 	 * In trusted vm, the connectors will not be enabled
@@ -4404,6 +4414,10 @@ static int dsi_display_res_deinit(struct dsi_display *display)
 	int rc = 0;
 	int i;
 	struct dsi_display_ctrl *ctrl;
+
+	wakeup_source_unregister(display->wk_lock);
+	display->wk_lock = NULL;
+	display->dsi_stay_awake = false;
 
 	display_for_each_ctrl(i, display) {
 		ctrl = &display->ctrl[i];
@@ -5160,14 +5174,21 @@ static int dsi_display_get_dfps_timing(struct dsi_display *display,
 		if (i < 0)
 			break;
 
-		if (!dfps_caps.dfps_hfp_list) {
-			DSI_ERR("dfps_caps.dfps_hfp_list is null ptr!");
-			break;
+		if ((u32)i >= dfps_caps.dfps_list_len ||
+			!dfps_caps.dfps_hfp_list || !dfps_caps.dfps_hbp_list ||
+			!dfps_caps.dfps_hpw_list || !dfps_caps.dfps_vbp_list ||
+			!dfps_caps.dfps_vfp_list || !dfps_caps.dfps_vpw_list) {
+			DSI_ERR("invalid dfps porch arrays or index %d\n", i);
+			return -EINVAL;
 		}
 
-		adj_mode->timing.h_front_porch = dfps_caps.dfps_hfp_list[i] *= display->ctrl_count;
-		adj_mode->timing.h_back_porch = dfps_caps.dfps_hbp_list[i] *= display->ctrl_count;
-		adj_mode->timing.h_sync_width = dfps_caps.dfps_hpw_list[i] *= display->ctrl_count;
+		if (check_mul_overflow(dfps_caps.dfps_hfp_list[i], display->ctrl_count,
+				&adj_mode->timing.h_front_porch) ||
+			check_mul_overflow(dfps_caps.dfps_hbp_list[i], display->ctrl_count,
+				&adj_mode->timing.h_back_porch) ||
+			check_mul_overflow(dfps_caps.dfps_hpw_list[i], display->ctrl_count,
+				&adj_mode->timing.h_sync_width))
+			return -EOVERFLOW;
 		adj_mode->timing.v_back_porch = dfps_caps.dfps_vbp_list[i];
 		adj_mode->timing.v_front_porch = dfps_caps.dfps_vfp_list[i];
 		adj_mode->timing.v_sync_width = dfps_caps.dfps_vpw_list[i];
@@ -7405,8 +7426,10 @@ int dsi_display_get_modes_helper(struct dsi_display *display,
 				sub_mode->priv_info->avr_step_fps = sub_mode->timing.avr_step_fps;
 			}
 
-			dsi_display_get_dfps_timing(display, sub_mode,
+			rc = dsi_display_get_dfps_timing(display, sub_mode,
 					curr_refresh_rate, i);
+			if (rc)
+				return rc;
 
 			/* Avoid override for first sub mode in POMS enabled video mode usecase */
 			if ((i != start) && support_cmd_mode && support_video_mode)
@@ -8002,9 +8025,7 @@ int dsi_display_set_lhbm_state(struct dsi_display *display, unsigned long fp_sta
 		return -EINVAL;
 	}
 
-	dsi_panel_set_lhbm_state(display->panel, fp_status);
-
-	return 0;
+	return dsi_panel_set_lhbm_state(display->panel, fp_status);
 }
 
 int dsi_display_set_mode(struct dsi_display *display,
@@ -8037,6 +8058,8 @@ int dsi_display_set_mode(struct dsi_display *display,
 	}
 	if (display->panel->cur_mode) {
 		pre_fps = display->panel->cur_mode->timing.refresh_rate;
+	} else {
+		pre_fps = mode->timing.refresh_rate;
 	}
 	aod_fps = (mode->timing.refresh_rate == 30) || (pre_fps == 30);
 
@@ -8083,8 +8106,11 @@ int dsi_display_set_mode(struct dsi_display *display,
 	memcpy(display->panel->cur_mode, &adj_mode, sizeof(adj_mode));
 error:
 	mutex_unlock(&display->display_lock);
+	if (rc)
+		return rc;
 	if (display->panel->panel_initialized) {
-		encoder = display->bridge->base.encoder;
+		if (display->bridge)
+			encoder = display->bridge->base.encoder;
 		if ((encoder != NULL) && (pre_fps != 0) && !aod_fps) {
 			if (sde_encoder_get_vblank_timestamp(encoder, &last_vsync)) {
 				diff_us = DIV_ROUND_UP((ktime_get() - last_vsync), 1000);
@@ -8094,13 +8120,13 @@ error:
 					//DSI_INFO("diff_us=%llu, period_us=%d, sleep_us=%d\n", diff_us, period_us, sleep_us);
 					usleep_range(sleep_us, sleep_us + 100);
 				} else if (diff_us > 0 && diff_us > period_us && pre_fps == 60) {
-					send_refreshrate_cmd(display->panel, timing.refresh_rate);
+					rc = send_refreshrate_cmd(display->panel, timing.refresh_rate);
 					goto skip;
 				}
 			}
 		}
 		display->queue_cmd_waits = true;
-		send_refreshrate_cmd(display->panel, timing.refresh_rate);
+		rc = send_refreshrate_cmd(display->panel, timing.refresh_rate);
 		display->queue_cmd_waits = false;
 	}
 skip:

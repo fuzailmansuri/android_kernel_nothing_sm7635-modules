@@ -7,8 +7,6 @@
 #ifndef __KGSL_PWRSCALE_H
 #define __KGSL_PWRSCALE_H
 
-#include <linux/kthread.h>
-
 #include "governor.h"
 #include "kgsl_pwrctrl.h"
 #include "msm_adreno_devfreq.h"

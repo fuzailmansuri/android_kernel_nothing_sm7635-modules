@@ -1,6 +1,6 @@
-/* 
+/*
  * Copyright (C) 2014-2020 NXP Semiconductors, All Rights Reserved.
- * Copyright 2020 GOODIX 
+ * Copyright 2020 GOODIX
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -10,7 +10,7 @@
 
 
 /** Filename: Tfa9890_TfaFieldnames.h
- *  This file was generated automatically on 04/07/15 at 14:46:37. 
+ *  This file was generated automatically on 04/07/15 at 14:46:37.
  *  Source file: TFA9897N1B_I2C_list_URT_source_v34_90Only.xls
  */
 #define TFA9890_I2CVERSION    34
@@ -84,4 +84,3 @@
    { 0x8f0f, "production_data6"},    /* (key1 protected)                                  , */\
    { 0xffff,"Unknown bitfield enum" }    /* not found */\
 };
-

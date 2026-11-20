@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2015-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2023-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 #include <linux/clk.h>
 #include <linux/delay.h>
@@ -887,7 +887,7 @@ int icnss_aop_pdc_reconfig(struct icnss_priv *priv)
 	if (priv->pdc_init_table_len <= 0 || !priv->pdc_init_table)
 		return 0;
 
-	icnss_pr_dbg("Setting PDC defaults for device ID: (0x%x)\n",
+	icnss_pr_dbg("Setting PDC defaults for device ID: (0x%lx)\n",
 		     priv->device_id);
 	for (i = 0; i < priv->pdc_init_table_len; i++) {
 		mbox_msg = (char *)priv->pdc_init_table[i];
@@ -1084,7 +1084,6 @@ int icnss_get_psf_info(struct icnss_priv *priv)
 		goto out;
 	}
 
-	INIT_WORK(&priv->soc_update_work, icnss_update_soc_level);
 	priv->psf_nb.notifier_call = icnss_battery_supply_callback;
 	ret = power_supply_reg_notifier(&priv->psf_nb);
 	if (ret < 0) {
@@ -1093,11 +1092,12 @@ int icnss_get_psf_info(struct icnss_priv *priv)
 		goto err_psf_registration;
 	}
 
+	INIT_WORK(&priv->soc_update_work, icnss_update_soc_level);
+
 	return 0;
 
 err_psf_registration:
 	destroy_workqueue(priv->soc_update_wq);
-	priv->soc_update_wq = NULL;
 out:
 	return ret;
 }

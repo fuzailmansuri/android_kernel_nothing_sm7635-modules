@@ -24,7 +24,7 @@ def _define_module(target, variant, lunch_target=None):
         "//vendor/qcom/opensource/mmrm-driver:{}_mmrm_driver".format(tv),
     ]
 
-    if target == "pineapple":
+    if target in ["pineapple", "fps"]:
         deps.extend([
             "//vendor/qcom/opensource/synx-kernel:synx_headers",
             "//vendor/qcom/opensource/synx-kernel:{}_modules".format(tv),
@@ -229,6 +229,12 @@ def _define_module(target, variant, lunch_target=None):
                     "drivers/cam_sensor_module/cam_flash/cam_flash_core.c",
                     "drivers/cam_sensor_module/cam_flash/cam_flash_soc.c",
                     "drivers/cam_sensor_module/cam_sensor_module_debug.c",
+                ],
+            },
+            "CONFIG_OIS_DW9784": {
+                True: [
+                    
+                    "drivers/cam_sensor_module/cam_ois/dw9784_ois.c",
                 ],
             },
             "CONFIG_SPECTRA_CUSTOM": {

@@ -1,6 +1,6 @@
-/* 
+/*
  * Copyright (C) 2014-2020 NXP Semiconductors, All Rights Reserved.
- * Copyright 2020 GOODIX 
+ * Copyright 2020 GOODIX
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -10,7 +10,7 @@
 
 
 /** Filename: Tfa1_TfaFieldnames.h
- *  This file was generated automatically on 03/20/2015 at 01:55:46 PM. 
+ *  This file was generated automatically on 03/20/2015 at 01:55:46 PM.
  *  Source file: TFA9897N1B_I2C_list_URT_Source_v34.xls
  */
 #define TFA9897_I2CVERSION 34

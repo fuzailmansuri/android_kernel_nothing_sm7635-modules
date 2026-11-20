@@ -10,6 +10,7 @@
 
 #include "sde_kms.h"
 #include "sde_connector.h"
+#include <linux/srcu.h>
 #include "sde_encoder.h"
 #include "msm_cooling_device.h"
 #include <linux/backlight.h>
@@ -32,7 +33,11 @@
 #ifdef PANEL_FEATURE_NODE_FLAG
 static struct kobject *k_obj = NULL;
 int panel_feature_node_exist = 0;
-struct sde_connector *panel_feature_sde_conn;
+static struct sde_connector __rcu *panel_feature_sde_conn;
+static DEFINE_MUTEX(panel_feature_lock);
+DEFINE_STATIC_SRCU(panel_feature_srcu);
+static void sde_panel_feature_cleanup(struct sde_connector *c_conn);
+static void sde_backlight_cleanup(struct sde_connector *c_conn);
 unsigned long fp_status = 0;
 EXPORT_SYMBOL(fp_status);
 #endif
@@ -136,89 +141,25 @@ static void sde_dimming_bl_notify(struct sde_connector *conn, struct dsi_backlig
 
 static int sde_backlight_device_update_status(struct backlight_device *bd)
 {
-	int brightness;
-	struct dsi_display *display;
 	struct sde_connector *c_conn = bl_get_data(bd);
-	int bl_lvl;
-	struct drm_event event;
-	int rc = 0;
-	struct sde_kms *sde_kms;
 
-	sde_kms = sde_connector_get_kms(&c_conn->base);
-	if (!sde_kms) {
-		SDE_ERROR("invalid kms\n");
+	if (!c_conn || !sde_connector_get_kms(&c_conn->base))
 		return -EINVAL;
-	}
 
-	if (c_conn) {
-		schedule_work(&c_conn->set_brightness_work);
-		return 0;
-	}
-
-	brightness = bd->props.brightness;
-
-	if ((bd->props.power != FB_BLANK_UNBLANK) ||
-			(bd->props.state & BL_CORE_FBBLANK) ||
-			(bd->props.state & BL_CORE_SUSPENDED))
-		brightness = 0;
-
-	display = (struct dsi_display *) c_conn->display;
-	if (brightness > display->panel->bl_config.brightness_max_level)
-		brightness = display->panel->bl_config.brightness_max_level;
-	if (brightness > c_conn->thermal_max_brightness)
-		brightness = c_conn->thermal_max_brightness;
-
-	display->panel->bl_config.brightness = brightness;
-	/* map UI brightness into driver backlight level with rounding */
-	bl_lvl = mult_frac(brightness, display->panel->bl_config.bl_max_level,
-			display->panel->bl_config.brightness_max_level);
-
-	if (!bl_lvl && brightness)
-		bl_lvl = 1;
-
-	if (!c_conn->allow_bl_update) {
-		c_conn->unset_bl_level = bl_lvl;
-		return 0;
-	}
-
-	sde_vm_lock(sde_kms);
-
-	if (!sde_vm_owns_hw(sde_kms)) {
-		SDE_DEBUG("skipping bl update due to HW unavailablity\n");
-		goto done;
-	}
-
-	if (c_conn->ops.set_backlight) {
-		/* skip notifying user space if bl is 0 */
-		if (brightness != 0) {
-			event.type = DRM_EVENT_SYS_BACKLIGHT;
-			event.length = sizeof(u32);
-			msm_mode_object_event_notify(&c_conn->base.base,
-				c_conn->base.dev, &event, (u8 *)&brightness);
-		}
-		rc = c_conn->ops.set_backlight(&c_conn->base,
-				c_conn->display, bl_lvl);
-
-		if (!rc) {
-			sde_dimming_bl_notify(c_conn, &display->panel->bl_config);
-			if (c_conn->base.state && c_conn->base.state->crtc) {
-				sde_crtc_backlight_notify(c_conn->base.state->crtc, brightness,
-					display->panel->bl_config.brightness_max_level);
-			}
-		}
-		c_conn->unset_bl_level = 0;
-	}
-
-done:
-	sde_vm_unlock(sde_kms);
-
-	return rc;
+	schedule_work(&c_conn->set_brightness_work);
+	return 0;
 }
 
 int nt_update_backlight(void)
 {
-	int rc = 0;
-	rc = sde_backlight_device_update_status(panel_feature_sde_conn->bl_device);
+	struct sde_connector *c_conn;
+	int index, rc = -ENODEV;
+
+	index = srcu_read_lock(&panel_feature_srcu);
+	c_conn = srcu_dereference(panel_feature_sde_conn, &panel_feature_srcu);
+	if (c_conn && c_conn->bl_device)
+		rc = sde_backlight_device_update_status(c_conn->bl_device);
+	srcu_read_unlock(&panel_feature_srcu, index);
 	return rc;
 }
 
@@ -279,6 +220,7 @@ static int sde_backlight_setup(struct sde_connector *c_conn,
 
 	snprintf(bl_node_name, BL_NODE_NAME_SIZE, "panel%u-backlight",
 							display_count);
+	c_conn->thermal_max_brightness = bl_config->brightness_max_level;
 	c_conn->bl_device = backlight_device_register(bl_node_name, dev->dev, c_conn,
 			&sde_backlight_device_ops, &props);
 	if (IS_ERR_OR_NULL(c_conn->bl_device)) {
@@ -287,7 +229,6 @@ static int sde_backlight_setup(struct sde_connector *c_conn,
 		c_conn->bl_device = NULL;
 		return -ENODEV;
 	}
-	c_conn->thermal_max_brightness = bl_config->brightness_max_level;
 
 	/**
 	 * In TVM, thermal cooling device is not enabled. Registering with dummy
@@ -305,8 +246,6 @@ static int sde_backlight_setup(struct sde_connector *c_conn,
 		c_conn->cdev = NULL;
 	}
 
-	SDE_INFO("set panel_feature_sde_conn in sde_backlight_setup\n");
-	panel_feature_sde_conn = c_conn;
 
 done:
 	display_count++;
@@ -1038,20 +977,21 @@ static int _sde_connector_update_dirty_properties(
 	return 0;
 }
 
-static void _sde_connector_update_fps_gamma(struct dsi_display *display)
+static int _sde_connector_update_fps_gamma(struct dsi_display *display)
 {
-	if (!display || !display->panel) {
+	if (!display || !display->panel || !display->panel->cur_mode) {
 		SDE_ERROR("Invalid params(s) dsi_display %pK, panel %pK\n",
 					display, ((display) ? display->panel : NULL));
-		return;
+		return -EINVAL;
 	}
 
 	if (display->config.panel_mode == DSI_OP_VIDEO_MODE) {
 		if(display->panel->cur_mode->timing.refresh_rate == 30)
-			return;
-		send_refreshrate_cmd(display->panel, display->panel->cur_mode->timing.refresh_rate);
+			return 0;
+		return send_refreshrate_cmd(display->panel,
+			display->panel->cur_mode->timing.refresh_rate);
 	}
-	return;
+	return 0;
 }
 static int _sde_connector_update_finger_hbm_status(
 				struct sde_connector *c_conn)
@@ -1070,7 +1010,7 @@ static int _sde_connector_update_finger_hbm_status(
 		return -EINVAL;
 	}
 
-	if (!display->panel->panel_initialized)
+	if (!display->panel->panel_initialized || !display->panel->cur_mode)
 		return 0;
 
 	if (fp_status == display->panel->lhbm_state)
@@ -1079,11 +1019,9 @@ static int _sde_connector_update_finger_hbm_status(
 	if (fp_status && display->panel->cur_mode->timing.refresh_rate != 120) {
 		SDE_ERROR("fps not equal 120, wait!");
 		return 0;
-	} 
+	}
 
-	dsi_display_set_lhbm_state(display, fp_status);
-
-	return 0;
+	return dsi_display_set_lhbm_state(display, fp_status);
 }
 
 static void sde_connector_set_brightness_work(struct work_struct *work)
@@ -1103,6 +1041,8 @@ static void sde_connector_set_brightness_work(struct work_struct *work)
 		return;
 	}
 	bd = c_conn->bl_device;
+	if (!bd)
+		return;
 
 	sde_kms = sde_connector_get_kms(&c_conn->base);
 	if (!sde_kms) {
@@ -1260,11 +1200,12 @@ int sde_connector_prepare_commit(struct drm_connector *connector)
 		}
 		display = (struct dsi_display *) c_conn->display;
 		if (display->panel->lhbm_wait) {
- 			display->panel->lhbm_wait = false;
-    		// skip gamma this commit, let it apply next time
+			display->panel->lhbm_wait = false;
+			// skip gamma this commit, let it apply next time
 		} else if (!display->panel->update_init_gamma || display->panel->needs_gamma_restore) {
-    		_sde_connector_update_fps_gamma(display);
-    		display->panel->needs_gamma_restore = false;
+			rc = _sde_connector_update_fps_gamma(display);
+			if (!rc)
+				display->panel->needs_gamma_restore = false;
 		}
 	}
 
@@ -1404,6 +1345,9 @@ void sde_connector_destroy(struct drm_connector *connector)
 	/* cancel if any pending esd work */
 	sde_connector_schedule_status_work(connector, false);
 
+	sde_panel_feature_cleanup(c_conn);
+	sde_backlight_cleanup(c_conn);
+
 	if (c_conn->ops.pre_destroy)
 		c_conn->ops.pre_destroy(connector, c_conn->display);
 
@@ -1418,10 +1362,6 @@ void sde_connector_destroy(struct drm_connector *connector)
 	if (c_conn->blob_ext_hdr)
 		drm_property_blob_put(c_conn->blob_ext_hdr);
 
-	if (c_conn->cdev)
-		backlight_cdev_unregister(c_conn->cdev);
-	if (c_conn->bl_device)
-		backlight_device_unregister(c_conn->bl_device);
 	drm_connector_unregister(connector);
 	mutex_destroy(&c_conn->lock);
 	sde_fence_deinit(c_conn->retire_fence);
@@ -2886,74 +2826,104 @@ end:
 
 static ssize_t panel_id1_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
 {
-	const char *read_id_cmd = "0x01 0x06 0x01 0x00 0x01 0x00 0x00 0x01 0xDA";
-	struct sde_connector *sde_conn = panel_feature_sde_conn;
-	int code_len = 44;
+	const char *cmd = "0x01 0x06 0x01 0x00 0x01 0x00 0x00 0x01 0xDA";
+	struct sde_connector *sde_conn;
+	int index, rc = -ENODEV;
 
-	nt_rx_cmd(sde_conn, read_id_cmd, code_len);
-
-	return sprintf(buf, "%.2x\n", sde_conn->cmd_rx_buf[0]);
+	index = srcu_read_lock(&panel_feature_srcu);
+	sde_conn = srcu_dereference(panel_feature_sde_conn, &panel_feature_srcu);
+	if (sde_conn) {
+		rc = nt_rx_cmd(sde_conn, cmd, strlen(cmd));
+		if (rc >= 0)
+			rc = sysfs_emit(buf, "%.2x\n", sde_conn->cmd_rx_buf[0]);
+	}
+	srcu_read_unlock(&panel_feature_srcu, index);
+	return rc;
 }
 
 static ssize_t panel_id2_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
 {
-	const char *read_id_cmd = "0x01 0x06 0x01 0x00 0x01 0x00 0x00 0x01 0xDB";
-	struct sde_connector *sde_conn = panel_feature_sde_conn;
-	int code_len = 44;
+	const char *cmd = "0x01 0x06 0x01 0x00 0x01 0x00 0x00 0x01 0xDB";
+	struct sde_connector *sde_conn;
+	int index, rc = -ENODEV;
 
-	nt_rx_cmd(sde_conn, read_id_cmd, code_len);
-
-	return sprintf(buf, "%.2x\n", sde_conn->cmd_rx_buf[0]);
+	index = srcu_read_lock(&panel_feature_srcu);
+	sde_conn = srcu_dereference(panel_feature_sde_conn, &panel_feature_srcu);
+	if (sde_conn) {
+		rc = nt_rx_cmd(sde_conn, cmd, strlen(cmd));
+		if (rc >= 0)
+			rc = sysfs_emit(buf, "%.2x\n", sde_conn->cmd_rx_buf[0]);
+	}
+	srcu_read_unlock(&panel_feature_srcu, index);
+	return rc;
 }
 
 static ssize_t panel_id3_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
 {
-	const char *read_id_cmd = "0x01 0x06 0x01 0x00 0x01 0x00 0x00 0x01 0xDC";
-	struct sde_connector *sde_conn = panel_feature_sde_conn;
-	int code_len = 44;
+	const char *cmd = "0x01 0x06 0x01 0x00 0x01 0x00 0x00 0x01 0xDC";
+	struct sde_connector *sde_conn;
+	int index, rc = -ENODEV;
 
-	nt_rx_cmd(sde_conn, read_id_cmd, code_len);
-
-	return sprintf(buf, "%.2x\n", sde_conn->cmd_rx_buf[0]);
+	index = srcu_read_lock(&panel_feature_srcu);
+	sde_conn = srcu_dereference(panel_feature_sde_conn, &panel_feature_srcu);
+	if (sde_conn) {
+		rc = nt_rx_cmd(sde_conn, cmd, strlen(cmd));
+		if (rc >= 0)
+			rc = sysfs_emit(buf, "%.2x\n", sde_conn->cmd_rx_buf[0]);
+	}
+	srcu_read_unlock(&panel_feature_srcu, index);
+	return rc;
 }
 
-static ssize_t store_fp_status(struct kobject *kobj,struct kobj_attribute *attr,const char *buf, size_t size)
+static ssize_t store_fp_status(struct kobject *kobj, struct kobj_attribute *attr,
+		const char *buf, size_t size)
 {
-	int rc = 0;
-	int mode = 0;
-	struct sde_connector *sde_conn = panel_feature_sde_conn;
+	struct sde_connector *sde_conn;
+	unsigned long status;
+	int index, mode, rc;
 
-	rc = kstrtoul(buf, 0, &fp_status);
-
-	if (!fp_status) {
+	rc = kstrtoul(buf, 0, &status);
+	if (rc)
+		return rc;
+	index = srcu_read_lock(&panel_feature_srcu);
+	sde_conn = srcu_dereference(panel_feature_sde_conn, &panel_feature_srcu);
+	if (!sde_conn) {
+		rc = -ENODEV;
+		goto out;
+	}
+	WRITE_ONCE(fp_status, status);
+	if (!status) {
 		mutex_lock(&sde_conn->lock);
 		mode = sde_conn->dpms_mode;
 		mutex_unlock(&sde_conn->lock);
 		if (mode != DRM_MODE_DPMS_OFF)
 			rc = _sde_connector_update_finger_hbm_status(sde_conn);
 	}
-
-	return size;
+out:
+	srcu_read_unlock(&panel_feature_srcu, index);
+	return rc < 0 ? rc : size;
 }
 
 static ssize_t show_fp_status(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
 {
-	return sprintf(buf, "%d\n", fp_status);
+	return sysfs_emit(buf, "%lu\n", READ_ONCE(fp_status));
 }
 
 static ssize_t show_brightnessid(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
 {
-	u16 brightnss = 0;
+	const char *cmd = "0x02 0x06 0x01 0x00 0x01 0x00 0x00 0x01 0x51";
+	struct sde_connector *sde_conn;
+	int index, rc = -ENODEV;
 
-	const char *read_id_cmd = "0x02 0x06 0x01 0x00 0x01 0x00 0x00 0x01 0x51";
-	struct sde_connector *sde_conn = panel_feature_sde_conn;
-	int code_len = 44;
-
-	nt_rx_cmd(sde_conn, read_id_cmd, code_len);
-
-	brightnss = (sde_conn->cmd_rx_buf[0] << 8) | sde_conn->cmd_rx_buf[1];
-
-	return sprintf(buf, "%d\n", brightnss);
+	index = srcu_read_lock(&panel_feature_srcu);
+	sde_conn = srcu_dereference(panel_feature_sde_conn, &panel_feature_srcu);
+	if (sde_conn) {
+		rc = nt_rx_cmd(sde_conn, cmd, strlen(cmd));
+		if (rc >= 0)
+			rc = sysfs_emit(buf, "%d\n", (sde_conn->cmd_rx_buf[0] << 8) | sde_conn->cmd_rx_buf[1]);
+	}
+	srcu_read_unlock(&panel_feature_srcu, index);
+	return rc;
 }
 
 static struct kobj_attribute panel_id1_attribute = __ATTR(panel_id1, S_IRUGO | S_IWUSR, panel_id1_show, NULL);
@@ -2974,6 +2944,44 @@ static struct attribute *panel_feature_attributes[] = {
 static const struct attribute_group panel_feature_attr_group = {
 	.attrs = panel_feature_attributes,
 };
+
+
+static void sde_panel_feature_cleanup(struct sde_connector *c_conn)
+{
+	struct kobject *obj = NULL;
+
+	mutex_lock(&panel_feature_lock);
+	if (rcu_access_pointer(panel_feature_sde_conn) == c_conn) {
+		rcu_assign_pointer(panel_feature_sde_conn, NULL);
+		obj = k_obj;
+		k_obj = NULL;
+		panel_feature_node_exist = 0;
+	}
+	mutex_unlock(&panel_feature_lock);
+	if (obj) {
+		sysfs_remove_group(obj, &panel_feature_attr_group);
+		kobject_put(obj);
+	}
+	synchronize_srcu(&panel_feature_srcu);
+}
+
+static void sde_backlight_cleanup(struct sde_connector *c_conn)
+{
+	struct backlight_device *bd = c_conn->bl_device;
+
+	if (c_conn->cdev) {
+		backlight_cdev_unregister(c_conn->cdev);
+		c_conn->cdev = NULL;
+	}
+	if (bd) {
+		get_device(&bd->dev);
+		backlight_device_unregister(bd);
+	}
+	cancel_work_sync(&c_conn->set_brightness_work);
+	c_conn->bl_device = NULL;
+	if (bd)
+		put_device(&bd->dev);
+}
 
 
 #if IS_ENABLED(CONFIG_DEBUG_FS)
@@ -3044,21 +3052,31 @@ int nt_is_panel_detected(void);
 
 static int sde_connector_late_register(struct drm_connector *connector)
 {
-	pr_err("sde_connector_late_register enter!\n");
+	int rc = 0;
 
-	/*add nt_is_panel_detected() to differ whether panel name is correct. */
-	if (!panel_feature_node_exist && nt_is_panel_detected()) {
+	mutex_lock(&panel_feature_lock);
+	if (rcu_access_pointer(panel_feature_sde_conn) == to_sde_connector(connector) &&
+	    !panel_feature_node_exist && nt_is_panel_detected()) {
 		k_obj = kobject_create_and_add("panel_feature", NULL);
-		if (sysfs_create_group(k_obj, &panel_feature_attr_group))
-			pr_err("panel_feature_attr_group error!\n");
-		panel_feature_node_exist = 1;
+		if (!k_obj) {
+			rc = -ENOMEM;
+		} else {
+			rc = sysfs_create_group(k_obj, &panel_feature_attr_group);
+			if (rc) {
+				kobject_put(k_obj);
+				k_obj = NULL;
+			} else {
+				panel_feature_node_exist = 1;
+			}
+		}
 	}
-
-	return sde_connector_init_debugfs(connector);
+	mutex_unlock(&panel_feature_lock);
+	return rc ? rc : sde_connector_init_debugfs(connector);
 }
 
 static void sde_connector_early_unregister(struct drm_connector *connector)
 {
+	sde_panel_feature_cleanup(to_sde_connector(connector));
 	/* debugfs under connector->debugfs are deleted by drm_debugfs */
 }
 
@@ -3890,6 +3908,7 @@ struct drm_connector *sde_connector_init(struct drm_device *dev,
 	}
 
 	mutex_init(&c_conn->lock);
+	INIT_WORK(&c_conn->set_brightness_work, sde_connector_set_brightness_work);
 
 	rc = drm_connector_attach_encoder(&c_conn->base, encoder);
 	if (rc) {
@@ -3918,6 +3937,8 @@ struct drm_connector *sde_connector_init(struct drm_device *dev,
 	}
 
 	rc = sde_connector_get_info(&c_conn->base, &display_info);
+	if (rc)
+		goto error_cleanup_fence;
 	if (!rc && (connector_type == DRM_MODE_CONNECTOR_DSI) &&
 			(display_info.capabilities & MSM_DISPLAY_CAP_VID_MODE))
 		sde_connector_register_event(&c_conn->base,
@@ -3957,7 +3978,13 @@ struct drm_connector *sde_connector_init(struct drm_device *dev,
 	INIT_DELAYED_WORK(&c_conn->status_work,
 			sde_connector_check_status_work);
 
-	INIT_WORK(&c_conn->set_brightness_work, sde_connector_set_brightness_work);
+
+	if (connector_type == DRM_MODE_CONNECTOR_DSI && c_conn->bl_device &&
+	    display_info.display_type == SDE_CONNECTOR_PRIMARY) {
+		mutex_lock(&panel_feature_lock);
+		rcu_assign_pointer(panel_feature_sde_conn, c_conn);
+		mutex_unlock(&panel_feature_lock);
+	}
 
 	return &c_conn->base;
 
@@ -3975,6 +4002,7 @@ error_destroy_property:
 
 	msm_property_destroy(&c_conn->property_info);
 error_cleanup_fence:
+	sde_backlight_cleanup(c_conn);
 	mutex_destroy(&c_conn->lock);
 	sde_fence_deinit(c_conn->retire_fence);
 error_cleanup_conn:

@@ -3243,7 +3243,7 @@ enum tfa_error tfa_dev_start(struct tfa_device *tfa, int next_profile, int vstep
 
         if ( (tfa->rev & 0xff) == 0x96 ) {
             old_profile = (unsigned short)tfa_dev_get_swprof(tfa);
-    		old_vstep = (unsigned short)tfa_dev_get_swvstep(tfa);
+                old_vstep = (unsigned short)tfa_dev_get_swvstep(tfa);
         }
 
 		/* Make sure internal oscillator is running for DSP devices (non-dsp and max1 this is no-op) */
@@ -3254,7 +3254,7 @@ enum tfa_error tfa_dev_start(struct tfa_device *tfa, int next_profile, int vstep
 
         if ( (tfa->rev & 0xff) == 0x96 ) {
             tfa_dev_set_swprof(tfa, (unsigned short)old_profile);
-    		tfa_dev_set_swvstep(tfa, (unsigned short)old_vstep);
+                tfa_dev_set_swvstep(tfa, (unsigned short)old_vstep);
         }
 	}
 	active_profile = tfa_dev_get_swprof(tfa);

@@ -12,6 +12,9 @@ LOCAL_MODULE_DDK_SUBTARGET_REGEX := "display_drivers*"
 ifeq ($(TARGET_BOARD_PLATFORM), volcano)
   LOCAL_MODULE_DDK_SUBTARGET_REGEX := "$(TARGET_BOARD_PLATFORM)_display_drivers.*"
 endif
+ifneq ($(filter $(TARGET_BASE_PRODUCT),$(T2M_CUSTO_PRODUCTS)),)
+  LOCAL_MODULE_DDK_SUBTARGET_REGEX := "display_drivers*"
+endif
 
 # This makefile is only for DLKM
 ifneq ($(findstring vendor,$(LOCAL_PATH)),)
@@ -31,6 +34,7 @@ KBUILD_OPTIONS := DISPLAY_ROOT=$(DISPLAY_BLD_DIR)
 KBUILD_OPTIONS += MODNAME=msm_drm
 KBUILD_OPTIONS += BOARD_PLATFORM=$(TARGET_BOARD_PLATFORM)
 KBUILD_OPTIONS += $(DISPLAY_SELECT)
+KBUILD_OPTIONS += KBUILD_EXTRA_SYMBOLS+=$(OUT_DIR)/obj/DLKM_OBJ/kernel_platform/msm-kernel/Module.symvers
 
 ifneq ($(TARGET_BOARD_AUTO),true)
 ifneq ($(TARGET_BOARD_PLATFORM), pitti)

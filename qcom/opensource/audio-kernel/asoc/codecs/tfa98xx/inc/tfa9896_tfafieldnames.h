@@ -1,6 +1,6 @@
-/* 
+/*
  * Copyright (C) 2014-2020 NXP Semiconductors, All Rights Reserved.
- * Copyright 2020 GOODIX 
+ * Copyright 2020 GOODIX
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -10,7 +10,7 @@
 
 
 /** Filename: tfa9896_tfafieldnames.h
- *  This file was generated automatically on 08/15/16 at 09:43:38. 
+ *  This file was generated automatically on 08/15/16 at 09:43:38.
  *  Source file: TFA9896_N1B1_I2C_regmap_V16.xlsx
  */
 

@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2013-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -713,7 +713,6 @@ int wma_stats_ext_event_handler(void *handle, uint8_t *event_buf,
 			  param_buf->num_partner_link_stats);
 
 	stats_ext_info = param_buf->fixed_param;
-	buf_ptr = (uint8_t *)stats_ext_info;
 
 	alloc_len += sizeof(tSirStatsExtEvent);
 	alloc_len += stats_ext_info->data_len;
@@ -743,7 +742,7 @@ int wma_stats_ext_event_handler(void *handle, uint8_t *event_buf,
 	if (!stats_ext_event)
 		return -ENOMEM;
 
-	buf_ptr += sizeof(wmi_stats_ext_event_fixed_param) + WMI_TLV_HDR_SIZE;
+	buf_ptr = (uint8_t *)param_buf->data;
 
 	stats_ext_event->vdev_id = stats_ext_info->vdev_id;
 	stats_ext_event->event_data_len = stats_ext_info->data_len;
@@ -817,7 +816,6 @@ int wma_stats_ext_event_handler(void *handle, uint8_t *event_buf,
 	}
 
 	stats_ext_info = param_buf->fixed_param;
-	buf_ptr = (uint8_t *)stats_ext_info;
 
 	alloc_len = sizeof(tSirStatsExtEvent);
 	alloc_len += stats_ext_info->data_len;
@@ -833,7 +831,7 @@ int wma_stats_ext_event_handler(void *handle, uint8_t *event_buf,
 	if (!stats_ext_event)
 		return -ENOMEM;
 
-	buf_ptr += sizeof(wmi_stats_ext_event_fixed_param) + WMI_TLV_HDR_SIZE;
+	buf_ptr = (uint8_t *)param_buf->data;
 
 	stats_ext_event->vdev_id = stats_ext_info->vdev_id;
 	stats_ext_event->event_data_len = stats_ext_info->data_len;
@@ -1409,8 +1407,8 @@ wma_fill_rx_stats(struct sir_wifi_ll_ext_stats *ll_stats,
 	}
 
 	/* Check if num_rx_stats is sufficient to avoid buffer overflow */
-	if (fix_param->num_peer_ac_rx_stats >
-	    param_buf->num_rx_stats / WLAN_MAX_AC) {
+	if (param_buf->num_rx_stats <
+	    fix_param->num_peer_ac_rx_stats * WLAN_MAX_AC) {
 		wma_err("Insufficient rx_stats buffer: available %d, required %d",
 			param_buf->num_rx_stats,
 			fix_param->num_peer_ac_rx_stats * WLAN_MAX_AC);

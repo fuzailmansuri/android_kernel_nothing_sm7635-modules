@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2011-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2024, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  */
 
 #include <linux/bitfield.h>
@@ -86,10 +86,12 @@ static u32 get_llcc_flags(struct kgsl_mmu *mmu)
 	if (!test_bit(KGSL_MMU_LLCC_ENABLE, &mmu->features))
 		return 0;
 
-	if (mmu->subtype == KGSL_IOMMU_SMMU_V500)
-		return 0;
-	else
-		return IOMMU_USE_UPSTREAM_HINT;
+	/* Return no-write-allocate if mmu feature for no-write-allocate is set */
+	if (test_bit(KGSL_MMU_FORCE_LLCC_NWA, &mmu->features))
+		return IOMMU_SYS_CACHE_NWA;
+
+	/* Return 0 as default llcc allocation policy */
+	return 0;
 }
 
 static int _iommu_get_protection_flags(struct kgsl_mmu *mmu,
@@ -428,11 +430,13 @@ static size_t _iopgtbl_map_page_to_range(struct kgsl_iommu_pt *pt,
 		struct page *page, u64 gpuaddr, size_t range, int prot)
 {
 	struct io_pgtable_ops *ops = pt->pgtbl_ops;
-	size_t mapped = 0, map_size = 0;
+	size_t mapped = 0;
 	u64 addr = gpuaddr;
 	int ret;
 
 	while (range) {
+		size_t map_size = 0;
+
 		ret = ops->map_pages(ops, addr, page_to_phys(page), PAGE_SIZE,
 				     1, prot, GFP_KERNEL, &map_size);
 		if (ret) {

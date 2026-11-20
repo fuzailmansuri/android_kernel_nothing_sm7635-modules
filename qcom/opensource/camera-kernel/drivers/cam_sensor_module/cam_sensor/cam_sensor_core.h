@@ -97,5 +97,5 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl, void *arg);
  * This API handles the camera sensor close/shutdown
  */
 void cam_sensor_shutdown(struct cam_sensor_ctrl_t *s_ctrl);
-
+static char sensor_cap_info[8]={0}; //add by jinghuang for complete switch for sHDR
 #endif /* _CAM_SENSOR_CORE_H_ */

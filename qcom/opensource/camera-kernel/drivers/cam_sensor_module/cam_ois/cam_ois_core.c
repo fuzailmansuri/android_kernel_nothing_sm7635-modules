@@ -15,7 +15,9 @@
 #include "cam_res_mgr_api.h"
 #include "cam_common_util.h"
 #include "cam_packet_util.h"
-
+#ifdef CONFIG_OIS_DW9784
+extern int dw9784_download_open_camera(struct cam_ois_ctrl_t *o_ctrl);
+#endif
 #define CAM_OIS_FW_VERSION_CHECK_MASK 0x1
 
 static inline uint64_t swap_high_byte_and_low_byte(uint8_t *src,
@@ -422,6 +424,8 @@ static int cam_ois_parse_fw_setting(uint8_t *cmd_buf, uint32_t size,
 	uint16_t                op_code;
 	uint32_t                j = 0;
 	struct list_head       *list = NULL;
+	uint32_t                payload_count = 0;
+	size_t                  tot_size = 0;
 
 	while (byte_cnt < size) {
 		if ((size - byte_cnt) < sizeof(struct common_header)) {
@@ -440,6 +444,7 @@ static int cam_ois_parse_fw_setting(uint8_t *cmd_buf, uint32_t size,
 			struct cam_cmd_i2c_random_wr
 			*cam_cmd_i2c_random_wr =
 			(struct cam_cmd_i2c_random_wr *)cmd_buf;
+			payload_count = cam_cmd_i2c_random_wr->header.count;
 
 			if ((size - byte_cnt) < sizeof(struct cam_cmd_i2c_random_wr)) {
 				CAM_ERR(CAM_OIS,
@@ -448,11 +453,22 @@ static int cam_ois_parse_fw_setting(uint8_t *cmd_buf, uint32_t size,
 				rc = -EINVAL;
 				goto end;
 			}
+			tot_size = sizeof(struct i2c_rdwr_header) +
+			(sizeof(struct i2c_random_wr_payload) *
+			payload_count);
+
+			if (tot_size > (size - byte_cnt)) {
+				CAM_ERR(CAM_SENSOR_UTIL,
+				"Not enough buffer provided %d, %d, %d",
+				tot_size, size, byte_cnt);
+				rc = -EINVAL;
+				goto end;
+			}
 
 			rc = cam_sensor_handle_random_write(
 				cam_cmd_i2c_random_wr,
 				reg_settings,
-				&cmd_length_in_bytes, &j, &list);
+				&cmd_length_in_bytes, &j, &list, payload_count);
 			if (rc < 0) {
 				CAM_ERR(CAM_OIS,
 				"Failed in random write %d", rc);
@@ -469,7 +485,7 @@ static int cam_ois_parse_fw_setting(uint8_t *cmd_buf, uint32_t size,
 			struct cam_cmd_i2c_continuous_wr
 			*cam_cmd_i2c_continuous_wr =
 			(struct cam_cmd_i2c_continuous_wr *)cmd_buf;
-
+			payload_count = cam_cmd_i2c_continuous_wr->header.count;
 			if ((size - byte_cnt) < sizeof(struct cam_cmd_i2c_continuous_wr)) {
 				CAM_ERR(CAM_OIS,
 					"Not enough buffer provided,size %d,byte_cnt %d",
@@ -477,11 +493,22 @@ static int cam_ois_parse_fw_setting(uint8_t *cmd_buf, uint32_t size,
 				rc = -EINVAL;
 				goto end;
 			}
+			tot_size = sizeof(struct i2c_rdwr_header) +
+			sizeof(cam_cmd_i2c_continuous_wr->reg_addr) +
+			(sizeof(struct cam_cmd_read) *
+			payload_count);
 
+			if (tot_size > (size - byte_cnt)) {
+				CAM_ERR(CAM_SENSOR_UTIL,
+				"Not enough buffer provided %d, %d, %d",
+				tot_size, size, byte_cnt);
+				rc = -EINVAL;
+				goto end;
+			}
 			rc = cam_sensor_handle_continuous_write(
 				cam_cmd_i2c_continuous_wr,
 				reg_settings,
-				&cmd_length_in_bytes, &j, &list);
+				&cmd_length_in_bytes, &j, &list, payload_count);
 			if (rc < 0) {
 				CAM_ERR(CAM_OIS,
 				"Failed in continuous write %d", rc);
@@ -546,7 +573,7 @@ static int cam_ois_parse_fw_setting(uint8_t *cmd_buf, uint32_t size,
 			uint16_t cmd_length_in_bytes = 0;
 			struct cam_cmd_i2c_random_rd *i2c_random_rd =
 			(struct cam_cmd_i2c_random_rd *)cmd_buf;
-
+			payload_count = i2c_random_rd->header.count;
 			if ((size - byte_cnt) < sizeof(struct cam_cmd_i2c_random_rd)) {
 				CAM_ERR(CAM_OIS,
 					"Not enough buffer provided,size %d,byte_cnt %d",
@@ -555,11 +582,21 @@ static int cam_ois_parse_fw_setting(uint8_t *cmd_buf, uint32_t size,
 				goto end;
 			}
 
+			tot_size = sizeof(struct i2c_rdwr_header) +
+			(sizeof(struct cam_cmd_read) *
+			payload_count);
+			if (tot_size > (size - byte_cnt)) {
+				CAM_ERR(CAM_SENSOR_UTIL,
+				"Not enough buffer provided %d, %d, %d",
+				tot_size, size, byte_cnt);
+				rc = -EINVAL;
+				goto end;
+			}
 			rc = cam_sensor_handle_random_read(
 				i2c_random_rd,
 				reg_settings,
 				&cmd_length_in_bytes, &j, &list,
-				NULL);
+				NULL, payload_count);
 			if (rc < 0) {
 				CAM_ERR(CAM_OIS,
 				"Failed in random read %d", rc);
@@ -847,13 +884,8 @@ static int write_ois_fw(uint8_t *fw_data, enum cam_endianness_type endianness,
 
 	for (wcnt = 0; wcnt < (fw_param->fw_size/data_type); wcnt += len_per_write) {
 		for (cnt = 0; cnt < len_per_write; cnt++, ptr += data_type) {
-			if (i2c_operation == CAM_SENSOR_I2C_WRITE_BURST) {
-				setting.reg_setting[cnt].reg_addr =
-					fw_param->fw_reg_addr;
-			} else {
-				setting.reg_setting[cnt].reg_addr =
-					fw_param->fw_reg_addr + wcnt + cnt;
-			}
+			setting.reg_setting[cnt].reg_addr =
+				fw_param->fw_reg_addr + wcnt + cnt;
 			/* Big */
 			if (endianness == CAM_ENDIANNESS_BIG) {
 				setting.reg_setting[cnt].reg_data =
@@ -874,9 +906,6 @@ static int write_ois_fw(uint8_t *fw_data, enum cam_endianness_type endianness,
 					goto End;
 				}
 			}
-			CAM_DBG(CAM_OIS, "Write fw addr 0x%x data 0x%x",
-				setting.reg_setting[cnt].reg_addr,
-				setting.reg_setting[cnt].reg_data);
 
 			setting.reg_setting[cnt].delay = fw_param->fw_delayUs;
 			setting.reg_setting[cnt].data_mask = 0;
@@ -1312,7 +1341,11 @@ static int cam_ois_pkt_parse(struct cam_ois_ctrl_t *o_ctrl, void *arg)
 			CAM_ERR(CAM_OIS,
 				"Cannot apply Init settings: rc = %d",
 				rc);
+			#ifdef CONFIG_OIS_DW9784
+			//goto pwr_dwn; //delete here,if the ois driver ic no need init setting
+                        #else
 			goto pwr_dwn;
+                        #endif
 		} else {
 			CAM_DBG(CAM_OIS, "apply Init settings success");
 		}
@@ -1336,8 +1369,13 @@ static int cam_ois_pkt_parse(struct cam_ois_ctrl_t *o_ctrl, void *arg)
 			}
 		}
 
-		o_ctrl->cam_ois_state = CAM_OIS_CONFIG;
-
+        o_ctrl->cam_ois_state = CAM_OIS_CONFIG;
+        #ifdef CONFIG_OIS_DW9784
+        //check fw and download&init ois
+        CAM_ERR(CAM_OIS, "jinghuang dw9784_download_open_camera");
+        dw9784_download_open_camera(o_ctrl);
+        #endif
+		
 		rc = delete_request(&o_ctrl->i2c_fwinit_data);
 		if (rc < 0) {
 			CAM_WARN(CAM_OIS,
@@ -1467,13 +1505,9 @@ static int cam_ois_pkt_parse(struct cam_ois_ctrl_t *o_ctrl, void *arg)
 			goto end;
 		}
 
-		// xft add for new_feature tele ois read more than one reg
-		// add func cam_ois_i2c_read_data @{
-		// rc = cam_sensor_i2c_read_data(
-		rc = cam_ois_i2c_read_data(
+		rc = cam_sensor_i2c_read_data(
 			&i2c_read_settings,
 			&o_ctrl->io_master_info);
-		// @}
 		if (rc < 0) {
 			CAM_ERR(CAM_OIS, "cannot read data rc: %d", rc);
 			delete_request(&i2c_read_settings);
@@ -1803,100 +1837,3 @@ release_mutex:
 	mutex_unlock(&(o_ctrl->ois_mutex));
 	return rc;
 }
-
-// xft add for new_feature tele ois read more than one reg
-// add func cam_ois_i2c_read_data @{
-int32_t cam_ois_i2c_read_data(
-	struct i2c_settings_array *i2c_settings,
-	struct camera_io_master *io_master_info)
-{
-	int32_t                   rc = 0;
-	struct i2c_settings_list  *i2c_list;
-	uint32_t                  cnt = 0;
-	uint8_t                   *read_buff = NULL;
-	uint32_t                  buff_length = 0;
-	uint32_t                  read_length = 0;
-	uint32_t                  read_cnt = 0;
-
-	list_for_each_entry(i2c_list,
-		&(i2c_settings->list_head), list) {
-		read_buff = i2c_list->i2c_settings.read_buff;
-		buff_length = i2c_list->i2c_settings.read_buff_len;
-		if ((read_buff == NULL) || (buff_length == 0)) {
-			CAM_ERR(CAM_SENSOR_UTIL,
-				"Invalid input buffer, buffer: %pK, length: %d",
-				read_buff, buff_length);
-			return -EINVAL;
-		}
-
-		if (i2c_list->op_code == CAM_SENSOR_I2C_READ_RANDOM) {
-			read_length = i2c_list->i2c_settings.data_type *
-				i2c_list->i2c_settings.size;
-			if ((read_length > buff_length) ||
-				(read_length < i2c_list->i2c_settings.size)) {
-				CAM_ERR(CAM_SENSOR_UTIL,
-				"Invalid size, readLen:%d, bufLen:%d, size: %d",
-				read_length, buff_length,
-				i2c_list->i2c_settings.size);
-				return -EINVAL;
-			}
-			for (cnt = 0; cnt < (i2c_list->i2c_settings.size);
-				cnt++) {
-				struct cam_sensor_i2c_reg_array *reg_setting =
-				&(i2c_list->i2c_settings.reg_setting[cnt]);
-				rc = camera_io_dev_read(io_master_info,
-					reg_setting->reg_addr,
-					&reg_setting->reg_data,
-					i2c_list->i2c_settings.addr_type,
-					i2c_list->i2c_settings.data_type,
-					false);
-				if (rc < 0) {
-					CAM_ERR(CAM_SENSOR_UTIL,
-					"Failed: random read I2C settings: %d",
-					rc);
-					return rc;
-				}
-				if (i2c_list->i2c_settings.data_type <
-					CAMERA_SENSOR_I2C_TYPE_MAX) {
-					memcpy(read_buff,
-					&reg_setting->reg_data,
-					i2c_list->i2c_settings.data_type);
-					read_buff +=
-					i2c_list->i2c_settings.data_type;
-				}
-			}
-		} else if (i2c_list->op_code == CAM_SENSOR_I2C_READ_SEQ) {
-			read_buff += read_cnt;
-			read_length = i2c_list->i2c_settings.size;
-			read_cnt += read_length;
-			if (read_length > buff_length) {
-				CAM_ERR(CAM_SENSOR_UTIL,
-				"Invalid buffer size, readLen: %d, bufLen: %d",
-				read_length, buff_length);
-				return -EINVAL;
-			}
-			if (read_cnt > buff_length) {
-				CAM_ERR(CAM_SENSOR_UTIL,
-				"Invalid buffer size, read_cnt: %d, bufLen: %d",
-				read_cnt, buff_length);
-				return -EINVAL;
-			}
-			rc = camera_io_dev_read_seq(
-				io_master_info,
-				i2c_list->i2c_settings.reg_setting[0].reg_addr,
-				read_buff,
-				i2c_list->i2c_settings.addr_type,
-				i2c_list->i2c_settings.data_type,
-				i2c_list->i2c_settings.size);
-			if (rc < 0) {
-				CAM_ERR(CAM_SENSOR_UTIL,
-					"failed: seq read I2C settings: %d",
-					rc);
-				return rc;
-			}
-		}
-	}
-
-	return rc;
-}
-// @}

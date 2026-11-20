@@ -4185,6 +4185,11 @@ static void wcd9378_soc_codec_remove(struct snd_soc_component *component)
 			__func__);
 		return;
 	}
+#ifdef CONFIG_DEBUG_FS
+	debugfs_remove_recursive(wcd9378->debugfs_wcd9378_dent);
+	wcd9378->debugfs_wcd9378_dent = NULL;
+	wcd9378->debugfs_reg_dump = NULL;
+#endif
 	if (wcd9378->register_notifier)
 		wcd9378->register_notifier(wcd9378->handle,
 						&wcd9378->nblock,

@@ -19,10 +19,6 @@
 
 extern struct completion *cam_sensor_get_i3c_completion(uint32_t index);
 
-/*xft begin*/
-extern int cam_nt_do_i2c_info(struct cam_sensor_ctrl_t *sctrl);
-/*xft end*/
-
 static int cam_sensor_notify_v4l2_error_event(
 	struct cam_sensor_ctrl_t *s_ctrl,
 	uint32_t error_type, uint32_t error_code)
@@ -181,6 +177,11 @@ static int cam_sensor_handle_res_info(struct cam_sensor_res_info *res_info,
 	s_ctrl->sensor_res[idx].res_index = res_info->res_index;
 	strscpy(s_ctrl->sensor_res[idx].caps, res_info->caps,
 		sizeof(s_ctrl->sensor_res[idx].caps));
+
+    //begin:add by jinghuang for complete switch for sHDR
+    strscpy(sensor_cap_info,res_info->caps,sizeof("SHDR"));
+    //end:add by jinghuang for complete switch for sHDR
+
 	s_ctrl->sensor_res[idx].width = res_info->width;
 	s_ctrl->sensor_res[idx].height = res_info->height;
 	s_ctrl->sensor_res[idx].fps = res_info->fps;
@@ -319,11 +320,20 @@ static int32_t cam_sensor_pkt_parse(struct cam_sensor_ctrl_t *s_ctrl,
 	if (csl_packet->header.request_id > s_ctrl->last_flush_req)
 		s_ctrl->last_flush_req = 0;
 
+	if ((int64_t)csl_packet->header.request_id < 0) {
+		CAM_ERR(CAM_SENSOR,
+			"Invalid request_id: %lld for opcode: 0x%x on %s, rejecting packet",
+			(int64_t)csl_packet->header.request_id,
+			csl_packet->header.op_code & 0xFFFFFF,
+			s_ctrl->sensor_name);
+		rc = -EINVAL;
+		goto end;
+	}
+
 	prev_updated_req = s_ctrl->last_updated_req;
 	s_ctrl->is_res_info_updated = false;
 
 	i2c_data = &(s_ctrl->i2c_data);
-	CAM_DBG(CAM_SENSOR, "Header OpCode: %d", csl_packet->header.op_code);
 	switch (csl_packet->header.op_code & 0xFFFFFF) {
 	case CAM_SENSOR_PACKET_OPCODE_SENSOR_INITIAL_CONFIG: {
 		i2c_reg_settings = &i2c_data->init_settings;
@@ -1001,6 +1011,11 @@ int cam_sensor_match_id(struct cam_sensor_ctrl_t *s_ctrl)
 	int rc = 0;
 	uint32_t chipid = 0;
 	struct cam_camera_slave_info *slave_info;
+	/*Begin zihao.li for [Task][FP5-162] FP5 add camera deviceinfo on 20230331*/
+	extern unsigned char CamNameB[128]; //Rear camera
+	extern unsigned char CamNameF[128]; //Front camera
+	extern unsigned char CamNameB2[128];//Wide camera
+	/*End   zihao.li for [Task][FP5-162] FP5 add camera deviceinfo on 20230331*/
 
 	slave_info = &(s_ctrl->sensordata->slave_info);
 
@@ -1028,6 +1043,20 @@ int cam_sensor_match_id(struct cam_sensor_ctrl_t *s_ctrl)
 				slave_info->sensor_id);
 		return -ENODEV;
 	}
+	/*Begin zihao.li for [Task][FP5-162] FP5 add camera deviceinfo on 20230331*/
+	if(chipid == 0x896) {
+		strcpy(CamNameB, "SONY_IMX896");
+	}
+	else if(chipid == 0x4841) {
+		strcpy(CamNameF, "SAMSUNG_S5KJN1");
+	}
+	else if(chipid == 0x0d42) {
+		strcpy(CamNameB2, "OmniVision_13B10");
+	}
+	else {
+		CAM_ERR(CAM_SENSOR, "FP6 Invalid sensor id %d", chipid);
+	}
+	/*End   zihao.li for [Task][FP5-162] FP5 add camera deviceinfo on 20230331*/
 	return rc;
 }
 
@@ -1575,6 +1604,7 @@ free_power_settings:
 	power_info->power_down_setting_size = 0;
 	power_info->power_setting_size = 0;
 	mutex_unlock(&(s_ctrl->cam_sensor_mutex));
+	
 	return rc;
 }
 
@@ -1787,7 +1817,70 @@ int cam_sensor_power_down(struct cam_sensor_ctrl_t *s_ctrl)
 
 	return rc;
 }
+//control sequence for the complete mode transition
+#define THRESHOLD   100
 
+static int i2c_write_reg_common(struct cam_sensor_ctrl_t *s_ctrl,uint32_t addr, uint32_t data){
+	int ret = -1;
+	struct cam_sensor_i2c_reg_setting i2c_reg_setting;
+	int num_byte =1;
+
+
+	if (s_ctrl == NULL ) {
+		CAM_ERR(CAM_SENSOR,"Invalid Args s_ctrl: %pK", s_ctrl);
+		return -EINVAL;
+	}
+
+	i2c_reg_setting.addr_type = CAMERA_SENSOR_I2C_TYPE_WORD;
+	i2c_reg_setting.data_type = CAMERA_SENSOR_I2C_TYPE_BYTE;
+	i2c_reg_setting.size = num_byte;
+	i2c_reg_setting.delay = 0;
+	i2c_reg_setting.reg_setting = (struct cam_sensor_i2c_reg_array *)
+			kzalloc(sizeof(struct cam_sensor_i2c_reg_array) *
+							num_byte, GFP_KERNEL);
+	if (i2c_reg_setting.reg_setting == NULL) {
+		CAM_ERR(CAM_SENSOR,"kzalloc failed");
+		return -1;
+	}
+	i2c_reg_setting.reg_setting[0].reg_addr = addr;
+	i2c_reg_setting.reg_setting[0].reg_data = data;
+	i2c_reg_setting.reg_setting[0].delay = 0;
+	i2c_reg_setting.reg_setting[0].data_mask = 0;
+
+	ret = camera_io_dev_write(&(s_ctrl->io_master_info),	&i2c_reg_setting);
+	if (ret < 0)
+		 CAM_ERR(CAM_SENSOR,"err! ret:%d", ret);
+	kfree(i2c_reg_setting.reg_setting);
+
+	return ret;
+}
+
+static int complete_mode_transition_top_half(struct cam_sensor_ctrl_t *s_ctrl){
+    int rc=-1;
+	//GRP_PAPAM_HOLD:0X01--hold the register update
+	rc = i2c_write_reg_common(s_ctrl,0x0104,0x01);
+	if (rc < 0) {
+		CAM_ERR(CAM_SENSOR,"Failed to random write I2C settings: %d",rc);
+		return rc;
+	}
+	//FAST_MODETRANSIT_CTL:0X02--fast mode transition/complete frame
+	rc = i2c_write_reg_common(s_ctrl,0x3010,0x02);
+	if (rc < 0) {
+		CAM_ERR(CAM_SENSOR,"Failed to random write I2C settings: %d",rc);
+		return rc;
+	}
+    return rc;
+}
+static int complete_mode_transition_bottom_half(struct cam_sensor_ctrl_t *s_ctrl){
+    int rc=-1;
+	//GRP_PAPAM_HOLD:0X00--release condition
+	rc = i2c_write_reg_common(s_ctrl,0x0104,0x00);
+	if (rc < 0) {
+		CAM_ERR(CAM_SENSOR,"Failed to random write I2C settings: %d",rc);
+		return rc;
+	}
+    return rc;
+}
 int cam_sensor_apply_settings(struct cam_sensor_ctrl_t *s_ctrl,
 	int64_t req_id, enum cam_sensor_packet_opcodes opcode)
 {
@@ -1795,7 +1888,6 @@ int cam_sensor_apply_settings(struct cam_sensor_ctrl_t *s_ctrl,
 	uint64_t top = 0, del_req_id = 0;
 	struct i2c_settings_array *i2c_set = NULL;
 	struct i2c_settings_list *i2c_list;
-
 	if (req_id == 0) {
 		switch (opcode) {
 		case CAM_SENSOR_PACKET_OPCODE_SENSOR_STREAMON: {
@@ -1844,6 +1936,7 @@ int cam_sensor_apply_settings(struct cam_sensor_ctrl_t *s_ctrl,
 				}
 			}
 		}
+
 	} else if (req_id > 0) {
 		offset = req_id % MAX_PER_FRAME_ARRAY;
 
@@ -1865,10 +1958,30 @@ int cam_sensor_apply_settings(struct cam_sensor_ctrl_t *s_ctrl,
 			i2c_set[offset].request_id == req_id) {
 			list_for_each_entry(i2c_list,
 				&(i2c_set[offset].list_head), list) {
-				if (!s_ctrl->hw_no_ops)
-					rc = cam_sensor_i2c_modes_util(
-						&(s_ctrl->io_master_info),
-						i2c_list);
+                if (!s_ctrl->hw_no_ops){
+                    if((!strncmp(s_ctrl->sensor_name,"fp6_imx896",sizeof("fp6_imx896")-1))&&
+                    (!strncmp(sensor_cap_info,"SHDR",sizeof("SHDR")-1))){//add by jinghuang for complete switch for sHDR
+                        //config complete mode top half
+                        if(i2c_list->i2c_settings.size > THRESHOLD){
+                        complete_mode_transition_top_half(s_ctrl);
+                        CAM_INFO(CAM_SENSOR, "shdr complete switch top half  :num[0]addr:0X0104,value:0x01");
+                        CAM_INFO(CAM_SENSOR, "shdr complete switch  top half :num[1]addr:0x3010,value:0x02");
+                        }
+                        rc = cam_sensor_i2c_modes_util(
+                        &(s_ctrl->io_master_info),
+                        i2c_list);
+                        //config complete mode bottom half
+                        if(i2c_list->i2c_settings.size > THRESHOLD){
+                        complete_mode_transition_bottom_half(s_ctrl);
+                        CAM_INFO(CAM_SENSOR, "shdr complete switch bottom half :num[0]addr:0X0104,value:0x00");
+                        }
+                    }else{
+                        rc = cam_sensor_i2c_modes_util(
+                        &(s_ctrl->io_master_info),
+                        i2c_list);
+                    }
+                }
+
 				if (rc < 0) {
 					CAM_ERR(CAM_SENSOR,
 						"Failed to apply settings: %d",
@@ -1958,10 +2071,7 @@ int cam_sensor_apply_settings(struct cam_sensor_ctrl_t *s_ctrl,
 		}
 	}
 
-	/*xft begin*/
-	cam_nt_do_i2c_info(s_ctrl);
-	/*xft end*/
-
+	
 	return rc;
 }
 

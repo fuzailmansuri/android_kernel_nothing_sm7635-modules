@@ -144,6 +144,7 @@ def define_pineapple(t, v, lt=None):
             "lpass_cdc_va_macro_dlkm",
             "lpass_cdc_rx_macro_dlkm",
             "lpass_cdc_tx_macro_dlkm",
+            "sdca_registers_dlkm",
             "wsa883x_dlkm",
             "wsa884x_dlkm",
             "wcd937x_dlkm",
@@ -152,6 +153,7 @@ def define_pineapple(t, v, lt=None):
             "wcd938x_slave_dlkm",
             "wcd939x_dlkm",
             "wcd939x_slave_dlkm",
+            "aw882xx_dlkm",
             "wcd9378_dlkm",
             "wcd9378_slave_dlkm"
         ],
@@ -165,6 +167,7 @@ def define_pineapple(t, v, lt=None):
             "CONFIG_BOLERO_VER_2P6",
             "CONFIG_WCD9XXX_CODEC_CORE_V2",
             "CONFIG_MSM_CDC_PINCTRL",
+            "CONFIG_SND_SOC_SDCA_REGISTERS",
             "CONFIG_SND_SOC_WCD_IRQ",
             "CONFIG_SND_SOC_WCD9XXX_V2",
             "CONFIG_SND_SOC_WCD_MBHC_ADC",
@@ -252,6 +255,7 @@ def define_pitti(t, v, lt=None):
             "swr_haptics_dlkm",
             "wcd_core_dlkm",
             "mbhc_dlkm",
+            "sdca_registers_dlkm",
             "wcd9xxx_dlkm",
             "stub_dlkm",
             "hdmi_dlkm",
@@ -274,6 +278,7 @@ def define_pitti(t, v, lt=None):
             "CONFIG_SOUNDWIRE_MSTR_CTRL",
             "CONFIG_WCD9XXX_CODEC_CORE_V2",
             "CONFIG_MSM_CDC_PINCTRL",
+            "CONFIG_SND_SOC_SDCA_REGISTERS",
             "CONFIG_SND_SOC_WCD_IRQ",
             "CONFIG_SND_SOC_WCD9XXX_V2",
             "CONFIG_SND_SOC_WCD_MBHC_ADC",
@@ -317,6 +322,7 @@ def define_volcano(t, v, lt=None):
             "lpass_cdc_va_macro_dlkm",
             "lpass_cdc_rx_macro_dlkm",
             "lpass_cdc_tx_macro_dlkm",
+            "sdca_registers_dlkm",
             "wsa883x_dlkm",
             "wsa884x_dlkm",
             "wcd937x_dlkm",
@@ -325,6 +331,72 @@ def define_volcano(t, v, lt=None):
             "wcd938x_slave_dlkm",
             "wcd939x_dlkm",
             "wcd939x_slave_dlkm",
+            "aw882xx_dlkm",
+            "wcd9378_dlkm",
+            "wcd9378_slave_dlkm"
+        ],
+        config_options = [
+            "CONFIG_SND_SOC_VOLCANO",
+            "CONFIG_SND_SOC_MSM_QDSP6V2_INTF",
+            "CONFIG_MSM_QDSP6_SSR",
+            "CONFIG_DIGITAL_CDC_RSC_MGR",
+            "CONFIG_SOUNDWIRE_MSTR_CTRL",
+            "CONFIG_SWRM_VER_1P7",
+            "CONFIG_BOLERO_VER_2P6",
+            "CONFIG_SND_SOC_SDCA_REGISTERS",
+            "CONFIG_WCD9XXX_CODEC_CORE_V2",
+            "CONFIG_MSM_CDC_PINCTRL",
+            "CONFIG_SND_SOC_WCD_IRQ",
+            "CONFIG_SND_SOC_WCD9XXX_V2",
+            "CONFIG_SND_SOC_WCD_MBHC_ADC",
+            "CONFIG_MSM_EXT_DISPLAY",
+        ],
+        lunch_target = lt,
+    )
+
+def define_fps(t, v, lt=None):
+    print(t)
+    define_target_modules(
+        target = "fps",
+        variant = v,
+        registry = audio_modules,
+        modules = [
+            "q6_dlkm",
+            "spf_core_dlkm",
+            "audpkt_ion_dlkm",
+            "q6_notifier_dlkm",
+            "adsp_loader_dlkm",
+            "audio_prm_dlkm",
+            "q6_pdr_dlkm",
+            "gpr_dlkm",
+            "audio_pkt_dlkm",
+            "pinctrl_lpi_dlkm",
+            "swr_dlkm",
+            "swr_ctrl_dlkm",
+            "snd_event_dlkm",
+            "wcd_core_dlkm",
+            "mbhc_dlkm",
+            "machine_dlkm",
+            "swr_dmic_dlkm",
+            "wcd9xxx_dlkm",
+            "swr_haptics_dlkm",
+            "stub_dlkm",
+            "hdmi_dlkm",
+            "lpass_cdc_dlkm",
+            "lpass_cdc_wsa_macro_dlkm",
+            "lpass_cdc_wsa2_macro_dlkm",
+            "lpass_cdc_va_macro_dlkm",
+            "lpass_cdc_rx_macro_dlkm",
+            "lpass_cdc_tx_macro_dlkm",
+            "wsa883x_dlkm",
+            "wsa884x_dlkm",
+            "wcd937x_dlkm",
+            "wcd937x_slave_dlkm",
+            "wcd938x_dlkm",
+            "wcd938x_slave_dlkm",
+            "wcd939x_dlkm",
+            "wcd939x_slave_dlkm",
+            "aw882xx_dlkm",
             "wcd9378_dlkm",
             "wcd9378_slave_dlkm"
         ],
@@ -360,6 +432,8 @@ def define_audio_target():
             define_kalama(t, v)
         if t == "niobe":
             define_niobe(t, v)
+        if t == "fps":
+            define_fps(t, v)
 
     for (lt, t, v) in get_all_lunch_target_base_target_variants():
         print(lt)

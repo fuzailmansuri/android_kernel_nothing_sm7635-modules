@@ -1,6 +1,6 @@
-/* 
+/*
  * Copyright (C) 2014-2020 NXP Semiconductors, All Rights Reserved.
- * Copyright 2020 GOODIX 
+ * Copyright 2020 GOODIX
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -235,17 +235,17 @@ enum tfa_error tfa_dev_set_state(struct tfa_device *tfa, enum tfa_state state,in
 enum tfa_state tfa_dev_get_state(struct tfa_device *tfa);
 
 /**
- * Deduce the width from machine driver and decide TDM setting to be 
+ * Deduce the width from machine driver and decide TDM setting to be
  * programmed to the TFA amplifier dynamically
  *  @param tfa struct = pointer to context of this device instance
  *  @param width = parmeters read from top layer to decide the applicable TDM settings
  *  @return tfa_error enum
-    - 0 if the width received is correct (16/32/24)     
- *  - others if width received is not correct 
+    - 0 if the width received is correct (16/32/24)
+ *  - others if width received is not correct
  */
 int tfa_dev_set_tdm_bitwidth(struct tfa_device *tfa, int width);
 /**
- * Fill TDM setting addresses for current device needed with dynamic TDM switch 
+ * Fill TDM setting addresses for current device needed with dynamic TDM switch
  *  @param tfa struct = pointer to context of this device instance
  *  @param tdme = pointer to be filled with TDME address
  *  @param tnbck = pointer to be filled with TDMNBCK address
@@ -308,4 +308,3 @@ int tfa_irq_unmask(struct tfa_device *tfa);
 //debug?
 
 #endif /* __TFA_DEVICE_H__ */
-

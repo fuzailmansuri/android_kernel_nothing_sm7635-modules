@@ -13,11 +13,12 @@ PRODUCT_PACKAGES += $(KERNEL_MODULES_OUT)/q6_notifier_dlkm.ko\
 	$(KERNEL_MODULES_OUT)/swr_ctrl_dlkm.ko \
 	$(KERNEL_MODULES_OUT)/snd_event_dlkm.ko \
 	$(KERNEL_MODULES_OUT)/wcd_core_dlkm.ko \
-	$(KERNEL_MODULES_OUT)/tfa98xx_dlkm.ko \
 	$(KERNEL_MODULES_OUT)/mbhc_dlkm.ko \
+	$(KERNEL_MODULES_OUT)/sdca_registers_dlkm.ko \
 	$(KERNEL_MODULES_OUT)/wcd9xxx_dlkm.ko \
 	$(KERNEL_MODULES_OUT)/stub_dlkm.ko \
-	$(KERNEL_MODULES_OUT)/machine_dlkm.ko
+	$(KERNEL_MODULES_OUT)/machine_dlkm.ko \
+	$(KERNEL_MODULES_OUT)/aw882xx_dlkm.ko
 ifneq (,$(call is-board-platform-in-list2,volcano))
 PRODUCT_PACKAGES += $(KERNEL_MODULES_OUT)/lpass_bt_swr_dlkm.ko
 endif

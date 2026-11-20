@@ -28,8 +28,6 @@
 
 #include "sde_dbg.h"
 
-#include <linux/nt_error_report.h>
-static int dsi_err_report = 1;
 
 #define DSI_CTRL_DEFAULT_LABEL "MDSS DSI CTRL"
 
@@ -401,10 +399,6 @@ static void dsi_ctrl_dma_cmd_wait_for_done(struct dsi_ctrl *dsi_ctrl)
 		} else {
 			SDE_EVT32(dsi_ctrl->cell_index, SDE_EVTLOG_ERROR);
 
-			if (dsi_err_report) {
-				nt_er_in_schedule(NT_DSI_ERR);
-				dsi_err_report = 0;
-			}
 
 			DSI_CTRL_ERR(dsi_ctrl,
 					"Command transfer failed\n");

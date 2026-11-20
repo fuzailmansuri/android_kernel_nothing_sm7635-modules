@@ -297,6 +297,8 @@ static int spf_core_probe(struct gpr_device *adev)
 	core->adev = adev;
 	init_waitqueue_head(&core->wait);
 	spf_core_priv->spf_core_drv = core;
+	if (spf_core_priv->is_initial_boot)
+		schedule_work(&spf_core_priv->add_chld_dev_work);
 	mutex_unlock(&spf_core_priv->lock);
 
 	return 0;
@@ -330,28 +332,6 @@ static struct gpr_driver qcom_spf_core_driver = {
 		.name = "qcom-spf_core",
 		.of_match_table = of_match_ptr(spf_core_device_id),
 	},
-};
-
-static int spf_core_bus_notify(struct notifier_block *nb,
-			       unsigned long event, void *data)
-{
-	struct device *dev = data;
-
-	if (event != BUS_NOTIFY_BOUND_DRIVER ||
-	    dev->driver != &qcom_spf_core_driver.driver)
-		return NOTIFY_DONE;
-
-	mutex_lock(&spf_core_priv->lock);
-	/* The GPR response route is ready once the client finishes binding. */
-	if (spf_core_priv->is_initial_boot)
-		schedule_work(&spf_core_priv->add_chld_dev_work);
-	mutex_unlock(&spf_core_priv->lock);
-
-	return NOTIFY_DONE;
-}
-
-static struct notifier_block spf_core_bus_nb = {
-	.notifier_call = spf_core_bus_notify,
 };
 
 static void spf_core_add_child_devices(struct work_struct *work)
@@ -394,20 +374,11 @@ static int spf_core_platform_driver_probe(struct platform_device *pdev)
 	INIT_WORK(&spf_core_priv->add_chld_dev_work, spf_core_add_child_devices);
 
 	spf_core_priv->is_initial_boot = true;
-	ret = bus_register_notifier(&gprbus, &spf_core_bus_nb);
-	if (ret) {
-		mutex_destroy(&spf_core_priv->lock);
-		spf_core_priv = NULL;
-		return ret;
-	}
 	ret = gpr_driver_register(&qcom_spf_core_driver);
 	if (ret) {
 		pr_err("%s: gpr driver register failed = %d\n",
 			__func__, ret);
-		bus_unregister_notifier(&gprbus, &spf_core_bus_nb);
-		mutex_destroy(&spf_core_priv->lock);
-		spf_core_priv = NULL;
-		return ret;
+		ret = 0;
 	}
 
 #if 0
@@ -425,8 +396,6 @@ static int spf_core_platform_driver_probe(struct platform_device *pdev)
 
 static int spf_core_platform_driver_remove(struct platform_device *pdev)
 {
-	bus_unregister_notifier(&gprbus, &spf_core_bus_nb);
-	cancel_work_sync(&spf_core_priv->add_chld_dev_work);
 	//snd_event_client_deregister(&pdev->dev);
         gpr_driver_unregister(&qcom_spf_core_driver);
 	spf_core_priv = NULL;

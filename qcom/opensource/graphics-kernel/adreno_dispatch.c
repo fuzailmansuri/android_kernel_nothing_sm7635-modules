@@ -517,13 +517,13 @@ static int sendcmd(struct adreno_device *adreno_dev,
 	unsigned long nsecs = 0;
 	int ret;
 	struct submission_info info = {0};
-	bool boost_submission = current->policy == SCHED_NORMAL;
+	int is_current_rt = rt_task(current);
 	int nice = task_nice(current);
 
 	mutex_lock(&device->mutex);
 
-	/* Reduce submission preemption while holding the device mutex. */
-	if (boost_submission)
+	/* Elevating thread’s priority to avoid context switch with holding device mutex */
+	if (!is_current_rt)
 		sched_set_fifo(current);
 
 	if (adreno_gpu_halt(adreno_dev) != 0) {
@@ -641,7 +641,7 @@ static int sendcmd(struct adreno_device *adreno_dev,
 	log_kgsl_cmdbatch_submitted_event(context->id, drawobj->timestamp,
 		context->priority, drawobj->flags);
 
-	if (boost_submission)
+	if (!is_current_rt)
 		sched_set_normal(current, nice);
 
 	mutex_unlock(&device->mutex);
@@ -671,7 +671,7 @@ static int sendcmd(struct adreno_device *adreno_dev,
 		gpudev->preemption_schedule(adreno_dev);
 	return 0;
 err:
-	if (boost_submission)
+	if (!is_current_rt)
 		sched_set_normal(current, nice);
 	mutex_unlock(&device->mutex);
 	return ret;

@@ -1,6 +1,6 @@
-/* 
+/*
  * Copyright (C) 2014-2020 NXP Semiconductors, All Rights Reserved.
- * Copyright 2020 GOODIX 
+ * Copyright 2020 GOODIX
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -20,7 +20,7 @@
 #define TFA98XXPARAMETERS_H_
 
 //#include "config.h"
-// workaround for Visual Studio: 
+// workaround for Visual Studio:
 // fatal error C1083: Cannot open include file: 'config.h': No such file or directory
 #ifdef __KERNEL__
 #include <linux/types.h>
@@ -111,10 +111,10 @@ typedef struct TfaDspMem {
 */
 typedef struct {
 	int a2;
-	int a1;	
-	int b2;	
-	int b1;	
-	int b0;	
+	int a1;
+	int b2;
+	int b1;
+	int b0;
 }TfaBiquad_t;
 
 typedef struct TfaBiquadOld {
@@ -161,7 +161,7 @@ typedef struct TfaFilter {
   float gain;
 } TfaFilter_t ;  //8 * float + int32 + byte == 37
 
-/* 
+/*
  * biquad params for calculation
 */
 
@@ -432,9 +432,9 @@ typedef struct TfaVolumeStep2File {
  */
 typedef struct TfaVolumeStepMax2File {
 	TfaHeader_t hdr;
-	uint8_t version[3]; 
+	uint8_t version[3];
 	uint8_t NrOfVsteps;
-	uint8_t vstepsBin[]; 
+	uint8_t vstepsBin[];
 }TfaVolumeStepMax2File_t;
 
 /*
@@ -443,9 +443,9 @@ typedef struct TfaVolumeStepMax2File {
  * This can only be used to find the messagetype of the vstep (without header)
  */
 typedef struct TfaVolumeStepMax2_1File {
-	uint8_t version[3]; 
+	uint8_t version[3];
 	uint8_t NrOfVsteps;
-	uint8_t vstepsBin[]; 
+	uint8_t vstepsBin[];
 }TfaVolumeStepMax2_1File_t;
 
 struct TfaVolumeStepRegisterInfo {

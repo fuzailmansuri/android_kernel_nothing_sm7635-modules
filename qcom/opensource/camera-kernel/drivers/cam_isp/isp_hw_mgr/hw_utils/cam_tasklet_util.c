@@ -270,7 +270,6 @@ void cam_tasklet_deinit(void    **tasklet_info)
 
 	if (atomic_read(&tasklet->tasklet_active)) {
 		atomic_set(&tasklet->tasklet_active, 0);
-		CAM_INFO(CAM_ISP, "deinit idx: %d tasklet_active set to 1", tasklet->index);
 		tasklet_kill(&tasklet->tasklet);
 		tasklet_disable(&tasklet->tasklet);
 	}
@@ -302,7 +301,6 @@ int cam_tasklet_start(void  *tasklet_info)
 	}
 
 	atomic_set(&tasklet->tasklet_active, 1);
-	CAM_INFO(CAM_ISP, "idx: %d tasklet_active set to 1", tasklet->index);
 
 	tasklet_enable(&tasklet->tasklet);
 
@@ -317,7 +315,6 @@ void cam_tasklet_stop(void  *tasklet_info)
 		return;
 
 	atomic_set(&tasklet->tasklet_active, 0);
-	CAM_INFO(CAM_ISP, "idx: %d tasklet_active set to 0", tasklet->index);
 	tasklet_kill(&tasklet->tasklet);
 	tasklet_disable(&tasklet->tasklet);
 	cam_tasklet_flush(tasklet);

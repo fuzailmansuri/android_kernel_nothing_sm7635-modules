@@ -649,26 +649,31 @@ int dsi_panel_set_lhbm_state(struct dsi_panel *panel, unsigned long fp_status)
 			SDE_ATRACE_BEGIN("DSI_CMD_SET_LHBM_ON");
 			rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_LHBM_ON);
 			SDE_ATRACE_END("DSI_CMD_SET_LHBM_ON");
+			if (rc) {
+				DSI_ERR("[%s] failed to send DSI_CMD_SET_LHBM_ON cmd, rc=%d\n", panel->name, rc);
+				goto unlock;
+			}
 			panel->lhbm_state = true;
 			update = true;
 			DSI_INFO("open local hbm");
-			if (rc)
-				DSI_ERR("[%s] failed to send DSI_CMD_SET_LHBM_ON cmd, rc=%d\n", panel->name, rc);
 		} else if (!fp_status && panel->lhbm_state) {
 			SDE_ATRACE_BEGIN("DSI_CMD_SET_LHBM_OFF");
 			rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_LHBM_OFF);
 			SDE_ATRACE_END("DSI_CMD_SET_LHBM_OFF");
+			if (rc) {
+				DSI_ERR("[%s] failed to send DSI_CMD_SET_LHBM_OFF cmd, rc=%d\n", panel->name, rc);
+				goto unlock;
+			}
 			panel->lhbm_state = false;
 			panel->needs_gamma_restore = true;
 			panel->lhbm_wait = true;
 			update = true;
 			DSI_INFO("close local hbm");
-			if (rc)
-				DSI_ERR("[%s] failed to send DSI_CMD_SET_LHBM_OFF cmd, rc=%d\n", panel->name, rc);
 		}
 	} else {
 		panel->lhbm_state = false;
 	}
+unlock:
 	mutex_unlock(&panel->panel_lock);
 
 	if (update)
@@ -1585,21 +1590,28 @@ static int dsi_panel_parse_dyn_clk_caps(struct dsi_panel *panel)
 	return 0;
 }
 
-static void dsi_panel_parse_dfps_porches(struct dsi_parser_utils *utils,
-	u32 **dfps_porch_list, const char *porch_type, u32 dfps_list_len) {
-	int rc = 0;
+static int dsi_panel_parse_dfps_porches(struct dsi_parser_utils *utils,
+	u32 **dfps_porch_list, const char *porch_type, u32 dfps_list_len)
+{
+	int count = utils->count_u32_elems(utils->data, porch_type);
+	int rc;
+
+	if (count < 1 || (u32)count < dfps_list_len) {
+		DSI_ERR("[%s] invalid dfps porch list length %d\n", porch_type, count);
+		return -EINVAL;
+	}
 
 	*dfps_porch_list = kcalloc(dfps_list_len, sizeof(u32), GFP_KERNEL);
 	if (!*dfps_porch_list) {
-		rc = -ENOMEM;
-		DSI_ERR("[%s] dfps porch list parse failed, rc = %d\n", porch_type, rc);
+		DSI_ERR("[%s] dfps porch list allocation failed\n", porch_type);
+		return -ENOMEM;
 	}
 
 	rc = utils->read_u32_array(utils->data, porch_type,
 			*dfps_porch_list, dfps_list_len);
 	if (rc) {
-		rc = -EINVAL;
 		DSI_ERR("[%s] dfps porch list parse failed, rc = %d\n", porch_type, rc);
+		return rc;
 	}
 
 	DSI_INFO("[%s]: ", porch_type);
@@ -1607,11 +1619,13 @@ static void dsi_panel_parse_dfps_porches(struct dsi_parser_utils *utils,
 	{
 		DSI_INFO("[%d] ", (*dfps_porch_list)[i]);
 	}
+	return 0;
 }
 
 static int dsi_panel_parse_dfps_caps(struct dsi_panel *panel)
 {
 	int rc = 0;
+	int dfps_list_len;
 	bool supported = false;
 	struct dsi_dfps_capabilities *dfps_caps = &panel->dfps_caps;
 	struct dsi_parser_utils *utils = &panel->utils;
@@ -1650,13 +1664,14 @@ static int dsi_panel_parse_dfps_caps(struct dsi_panel *panel)
 		goto error;
 	}
 
-	dfps_caps->dfps_list_len = utils->count_u32_elems(utils->data,
+	dfps_list_len = utils->count_u32_elems(utils->data,
 				  "qcom,dsi-supported-dfps-list");
-	if (dfps_caps->dfps_list_len < 1) {
+	if (dfps_list_len < 1) {
 		DSI_ERR("[%s] dfps refresh list not present\n", name);
 		rc = -EINVAL;
 		goto error;
 	}
+	dfps_caps->dfps_list_len = dfps_list_len;
 
 	dfps_caps->dfps_list = kcalloc(dfps_caps->dfps_list_len, sizeof(u32),
 			GFP_KERNEL);
@@ -1676,18 +1691,30 @@ static int dsi_panel_parse_dfps_caps(struct dsi_panel *panel)
 	}
 
 	if (dfps_caps->type == DSI_DFPS_IMMEDIATE_HV_P) {
-		dsi_panel_parse_dfps_porches(utils, &dfps_caps->dfps_hfp_list, "qcom,dsi-dfps-hfp-list",
+		rc = dsi_panel_parse_dfps_porches(utils, &dfps_caps->dfps_hfp_list, "qcom,dsi-dfps-hfp-list",
 			dfps_caps->dfps_list_len);
-		dsi_panel_parse_dfps_porches(utils, &dfps_caps->dfps_hbp_list, "qcom,dsi-dfps-hbp-list",
+		if (rc)
+			goto error;
+		rc = dsi_panel_parse_dfps_porches(utils, &dfps_caps->dfps_hbp_list, "qcom,dsi-dfps-hbp-list",
 			dfps_caps->dfps_list_len);
-		dsi_panel_parse_dfps_porches(utils, &dfps_caps->dfps_hpw_list, "qcom,dsi-dfps-hpw-list",
+		if (rc)
+			goto error;
+		rc = dsi_panel_parse_dfps_porches(utils, &dfps_caps->dfps_hpw_list, "qcom,dsi-dfps-hpw-list",
 			dfps_caps->dfps_list_len);
-		dsi_panel_parse_dfps_porches(utils, &dfps_caps->dfps_vbp_list, "qcom,dsi-dfps-vbp-list",
+		if (rc)
+			goto error;
+		rc = dsi_panel_parse_dfps_porches(utils, &dfps_caps->dfps_vbp_list, "qcom,dsi-dfps-vbp-list",
 			dfps_caps->dfps_list_len);
-		dsi_panel_parse_dfps_porches(utils, &dfps_caps->dfps_vfp_list, "qcom,dsi-dfps-vfp-list",
+		if (rc)
+			goto error;
+		rc = dsi_panel_parse_dfps_porches(utils, &dfps_caps->dfps_vfp_list, "qcom,dsi-dfps-vfp-list",
 			dfps_caps->dfps_list_len);
-		dsi_panel_parse_dfps_porches(utils, &dfps_caps->dfps_vpw_list, "qcom,dsi-dfps-vpw-list",
+		if (rc)
+			goto error;
+		rc = dsi_panel_parse_dfps_porches(utils, &dfps_caps->dfps_vpw_list, "qcom,dsi-dfps-vpw-list",
 			dfps_caps->dfps_list_len);
+		if (rc)
+			goto error;
 	}
 
 	dfps_caps->dfps_support = true;
@@ -1702,8 +1729,17 @@ static int dsi_panel_parse_dfps_caps(struct dsi_panel *panel)
 		else if (dfps_caps->dfps_list[i] > dfps_caps->max_refresh_rate)
 			dfps_caps->max_refresh_rate = dfps_caps->dfps_list[i];
 	}
+	return 0;
 
 error:
+	kfree(dfps_caps->dfps_list);
+	kfree(dfps_caps->dfps_hfp_list);
+	kfree(dfps_caps->dfps_hbp_list);
+	kfree(dfps_caps->dfps_hpw_list);
+	kfree(dfps_caps->dfps_vbp_list);
+	kfree(dfps_caps->dfps_vfp_list);
+	kfree(dfps_caps->dfps_vpw_list);
+	memset(dfps_caps, 0, sizeof(*dfps_caps));
 	return rc;
 }
 
@@ -5100,6 +5136,9 @@ extern int nt_update_backlight(void);
 int send_refreshrate_cmd(struct dsi_panel *panel, int refreshrate)
 {
 	int rc = 0;
+
+	if (!panel)
+		return -EINVAL;
 	mutex_lock(&panel->panel_lock);
 	if (panel->lhbm_state) {
 		goto error;
@@ -5160,7 +5199,7 @@ int send_refreshrate_cmd(struct dsi_panel *panel, int refreshrate)
 
 error:
 	mutex_unlock(&panel->panel_lock);
-	return 0;
+	return rc;
 }
 
 int dsi_panel_enable(struct dsi_panel *panel)

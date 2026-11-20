@@ -1,6 +1,6 @@
-/* 
+/*
  * Copyright (C) 2014-2020 NXP Semiconductors, All Rights Reserved.
- * Copyright 2020 GOODIX 
+ * Copyright 2020 GOODIX
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -507,7 +507,7 @@ static enum Tfa98xx_Error tfa9912_set_osc_powerdown(struct tfa_device *tfa, int 
 *
 *  @param[in] tfa device description structure
 *  @param[in] state State of the low power mode1 detector control
-*  0 - low power mode1 detector control enabled, 
+*  0 - low power mode1 detector control enabled,
 *  1 - low power mode1 detector control disabled(low power mode is also disabled).
 *
 *  @return Tfa98xx_Error_Ok when successfull, error otherwise.

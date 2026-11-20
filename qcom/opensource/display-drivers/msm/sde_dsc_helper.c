@@ -42,8 +42,15 @@ static u16 sde_dsc_rc_buf_thresh[DSC_NUM_BUF_RANGES - 1] =
  */
 static char sde_dsc_rc_range_min_qp[DSC_RATIO_TYPE_MAX][DSC_NUM_BUF_RANGES] = {
 	/* DSC v1.1 */
+/*FPS-942 Modify horizontal strips appear on screen.[Begin]*/
+#if defined(CONFIG_ARCH_FPSPRING)
+	{0, 0, 1, 1, 3, 3, 3, 3, 3, 4, 5, 5, 5, 8, 12},
+	{0, 4, 5, 5, 7, 7, 7, 7, 7, 8, 9, 9, 9, 12, 16},
+#else
 	{0, 0, 1, 1, 3, 3, 3, 3, 3, 3, 5, 5, 5, 7, 13},
 	{0, 4, 5, 5, 7, 7, 7, 7, 7, 7, 9, 9, 9, 11, 17},
+#endif
+/*FPS-942 Modify horizontal strips appear on screen.[End]*/
 	{0, 4, 5, 6, 7, 7, 7, 7, 7, 7, 9, 9, 9, 11, 15},
 	/* DSC v1.1 SCR and DSC v1.2 RGB 444 */
 	{0, 0, 1, 1, 3, 3, 3, 3, 3, 3, 5, 5, 5, 9, 12},
@@ -66,8 +73,15 @@ static char sde_dsc_rc_range_min_qp[DSC_RATIO_TYPE_MAX][DSC_NUM_BUF_RANGES] = {
  */
 static char sde_dsc_rc_range_max_qp[DSC_RATIO_TYPE_MAX][DSC_NUM_BUF_RANGES] = {
 	/* DSC v1.1 */
+/*FPS-942 Modify horizontal strips appear on screen.[Begin]*/
+#if defined(CONFIG_ARCH_FPSPRING)
+	{4, 4, 5, 6, 7, 7, 7, 8, 9, 10, 10, 11, 11, 12, 13},
+	{8, 8, 9, 10, 11, 11, 11, 12, 13, 14, 14, 15, 15, 16, 17},
+#else
 	{4, 4, 5, 6, 7, 7, 7, 8, 9, 10, 11, 12, 13, 13, 15},
 	{4, 8, 9, 10, 11, 11, 11, 12, 13, 14, 15, 16, 17, 17, 19},
+#endif
+/*FPS-942 Modify horizontal strips appear on screen.[End]*/
 	{7, 8, 9, 10, 11, 11, 11, 12, 13, 13, 14, 14, 15, 15, 16},
 	/* DSC v1.1 SCR and DSC v1.2 RGB 444 */
 	{4, 4, 5, 6, 7, 7, 7, 8, 9, 10, 10, 11, 11, 12, 13},
@@ -90,8 +104,15 @@ static char sde_dsc_rc_range_max_qp[DSC_RATIO_TYPE_MAX][DSC_NUM_BUF_RANGES] = {
  */
 static char sde_dsc_rc_range_bpg[DSC_RATIO_TYPE_MAX][DSC_NUM_BUF_RANGES] = {
 	/* DSC v1.1 */
+/*FPS-942 Modify horizontal strips appear on screen.[Begin]*/
+#if defined(CONFIG_ARCH_FPSPRING)
+	{2, 0, 0, -2, -4, -6, -8, -8, -8, -10, -10, -10, -12, -12, -12},
+	{2, 0, 0, -2, -4, -6, -8, -8, -8, -10, -10, -10, -12, -12, -12},
+#else
 	{2, 0, 0, -2, -4, -6, -8, -8, -8, -10, -10, -12, -12, -12, -12},
 	{2, 0, 0, -2, -4, -6, -8, -8, -8, -10, -10, -12, -12, -12, -12},
+#endif
+/*FPS-942 Modify horizontal strips appear on screen.[End]*/
 	{2, 0, 0, -2, -4, -6, -8, -8, -8, -10, -10, -10, -12, -12, -12},
 	/* DSC v1.1 SCR and DSC V1.2 RGB 444 */
 	{2, 0, 0, -2, -4, -6, -8, -8, -8, -10, -10, -12, -12, -12, -12},
@@ -259,7 +280,13 @@ int sde_dsc_populate_dsc_config(struct drm_dsc_config *dsc, int scr_ver) {
 		if (scr_ver == 0x1)
 			dsc->first_line_bpg_offset = 15;
 		else
+	/*FPS-942 Modify horizontal strips appear on screen.[Begin]*/
+	#if defined(CONFIG_ARCH_FPSPRING)
+			dsc->first_line_bpg_offset = 13;
+	#elif
 			dsc->first_line_bpg_offset = 12;
+	#endif
+	/*FPS-942 Modify horizontal strips appear on screen.[End]*/
 	} else if (dsc->dsc_version_minor == 0x2) {
 		dsc->first_line_bpg_offset = _get_dsc_v1_2_bpg_offset(dsc);
 	}

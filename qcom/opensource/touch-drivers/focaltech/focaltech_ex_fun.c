@@ -1916,4 +1916,3 @@ int fts_procfs_exit(void)
 #endif
     return 0;
 }
-

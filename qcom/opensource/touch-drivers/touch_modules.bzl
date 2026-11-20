@@ -31,6 +31,7 @@ module_entry(
             "goodix_berlin_driver/goodix_ts_core.c",
             "goodix_berlin_driver/goodix_ts_gesture.c",
             "goodix_berlin_driver/goodix_ts_inspect.c",
+            "goodix_berlin_driver/goodix_ts_proc.c",
             "goodix_berlin_driver/goodix_ts_tools.c",
             "goodix_berlin_driver/goodix_ts_utils.c"
     ]
@@ -53,17 +54,33 @@ module_entry(
     name = "focaltech_fts",
     config_option = "CONFIG_TOUCH_FOCALTECH",
     srcs = [
-            "focaltech/focaltech_core.c",
-            "focaltech/focaltech_esdcheck.c",
-            "focaltech/focaltech_ex_fun.c",
-            "focaltech/focaltech_ex_mode.c",
-            "focaltech/focaltech_flash/focaltech_upgrade_ft3683g.c",
-            "focaltech/focaltech_flash/focaltech_upgrade_ft3681.c",
-            "focaltech/focaltech_flash.c",
-            "focaltech/focaltech_gesture.c",
-            "focaltech/focaltech_spi_v2.c",
-            "focaltech/focaltech_point_report_check.c",
-            "focaltech/focaltech_debug.c"
+            "focaltech_touch/focaltech_core.c",
+            "focaltech_touch/focaltech_esdcheck.c",
+            "focaltech_touch/focaltech_ex_fun.c",
+            "focaltech_touch/focaltech_ex_mode.c",
+            "focaltech_touch/focaltech_flash/focaltech_upgrade_ft3518.c",
+            "focaltech_touch/focaltech_flash.c",
+            "focaltech_touch/focaltech_gesture.c",
+            "focaltech_touch/focaltech_i2c.c",
+            "focaltech_touch/focaltech_point_report_check.c"
+    ]
+)
+
+#define ddk_module() for focaltech_tp (ft3169)
+module_entry(
+    name = "focaltech_tp",
+    config_option = "CONFIG_TOUCHSCREEN_FTS",
+    srcs = [
+            "focaltech_touch_ft3169/focaltech_core.c",
+            "focaltech_touch_ft3169/focaltech_esdcheck.c",
+            "focaltech_touch_ft3169/focaltech_ex_fun.c",
+            "focaltech_touch_ft3169/focaltech_ex_mode.c",
+            "focaltech_touch_ft3169/focaltech_flash/focaltech_upgrade_ft3169.c",
+            "focaltech_touch_ft3169/focaltech_flash.c",
+            "focaltech_touch_ft3169/focaltech_gesture.c",
+            "focaltech_touch_ft3169/focaltech_i2c.c",
+            "focaltech_touch_ft3169/focaltech_point_report_check.c",
+            "focaltech_touch_ft3169/focaltech_proximity.c"
     ]
 )
 
@@ -161,5 +178,21 @@ module_entry(
             "raydium/chip_raydium/f303_ic_test.c",
             "raydium/chip_raydium/ic_drv_global.c",
             "raydium/chip_raydium/ic_drv_interface.c"
+    ]
+)
+
+#define ddk_module() for eswin_ts
+module_entry(
+    name = "eswin_ts",
+    config_option = "CONFIG_TOUCHSCREEN_EPHTouch",
+    srcs = [
+            "eswin_touch/eswin_eph861x.c",
+            "eswin_touch/eswin_eph861x_bootloader.c",
+            "eswin_touch/eswin_eph861x_comms.c",
+            "eswin_touch/eswin_eph861x_eswin.c",
+            "eswin_touch/eswin_eph861x_i2c.c",
+            "eswin_touch/eswin_eph861x_spi.c",
+            "eswin_touch/eswin_eph861x_tlv_command.c",
+            "eswin_touch/eswin_eph861x_tlv_report.c",
     ]
 )

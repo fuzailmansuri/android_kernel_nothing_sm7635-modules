@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2012-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -136,6 +136,8 @@
 #define HDD_80211_MODE_AX 2
 /* Defines the BIT position of 11be support mode field of stainfo */
 #define HDD_80211_MODE_BE 4
+
+#define HDD_MAX_CUSTOM_START_EVENT_SIZE 64
 
 #ifdef NDP_SAP_CONCURRENCY_ENABLE
 #define MAX_SAP_NUM_CONCURRENCY_WITH_NAN 2
@@ -711,6 +713,28 @@ static int hdd_hostapd_change_mtu(struct net_device *net_dev, int new_mtu)
 	return errno;
 }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 7, 0)
+static void hdd_wiphy_lock(struct wireless_dev *dev_ptr)
+{
+	mutex_lock(&dev_ptr->mtx);
+}
+
+static void hdd_wiphy_unlock(struct wireless_dev *dev_ptr)
+{
+	mutex_unlock(&dev_ptr->mtx);
+}
+#else
+static void hdd_wiphy_lock(struct wireless_dev *dev_ptr)
+{
+	mutex_lock(&dev_ptr->wiphy->mtx);
+}
+
+static void hdd_wiphy_unlock(struct wireless_dev *dev_ptr)
+{
+	mutex_unlock(&dev_ptr->wiphy->mtx);
+}
+#endif
+
 #ifdef QCA_HT_2040_COEX
 QDF_STATUS hdd_set_sap_ht2040_mode(struct hdd_adapter *adapter,
 				   uint8_t channel_type)
@@ -1102,7 +1126,7 @@ static void hdd_chan_change_notify_update(struct wlan_hdd_link_info *link_info)
 		dev = assoc_adapter->dev;
 	}
 
-	mutex_lock(&dev->ieee80211_ptr->mtx);
+	hdd_wiphy_lock(dev->ieee80211_ptr);
 	if (wlan_vdev_mlme_is_active(vdev) != QDF_STATUS_SUCCESS) {
 		hdd_debug("Vdev %d mode %d not UP", vdev_id,
 			  adapter->device_mode);
@@ -1140,7 +1164,7 @@ static void hdd_chan_change_notify_update(struct wlan_hdd_link_info *link_info)
 	wlan_cfg80211_ch_switch_notify(dev, &chandef, link_id, puncture_bitmap);
 
 exit:
-	mutex_unlock(&dev->ieee80211_ptr->mtx);
+	hdd_wiphy_unlock(dev->ieee80211_ptr);
 	hdd_objmgr_put_vdev_by_user(vdev, WLAN_OSIF_ID);
 }
 
@@ -2146,14 +2170,15 @@ QDF_STATUS hdd_hostapd_sap_event_cb(struct sap_event *sap_event,
 	struct net_device *dev;
 	eSapHddEvent event_id;
 	union iwreq_data wrqu;
-	const char *we_custom_event_generic = NULL;
+	uint8_t *we_custom_event_generic = NULL;
 	int we_event = 0;
 	uint8_t sta_id;
 	QDF_STATUS qdf_status;
 	bool bAuthRequired = true;
 	char *unknownSTAEvent = NULL;
 	char *maxAssocExceededEvent = NULL;
-	const char *start_bss_event = "SOFTAP.enabled";
+	uint8_t *we_custom_start_event = NULL;
+	char *startBssEvent;
 	struct hdd_context *hdd_ctx;
 	struct iw_michaelmicfailure msg;
 	uint8_t ignoreCAC = 0;
@@ -2383,10 +2408,20 @@ QDF_STATUS hdd_hostapd_sap_event_cb(struct sap_event *sap_event,
 		/* Fill the params for sending IWEVCUSTOM Event
 		 * with SOFTAP.enabled
 		 */
+		we_custom_start_event =
+				qdf_mem_malloc(HDD_MAX_CUSTOM_START_EVENT_SIZE);
+		if (!we_custom_start_event)
+			goto stopbss;
+
+		startBssEvent = "SOFTAP.enabled";
+		memset(we_custom_start_event, '\0',
+		       sizeof(HDD_MAX_CUSTOM_START_EVENT_SIZE));
+		memcpy(we_custom_start_event, startBssEvent,
+		       strlen(startBssEvent));
 		memset(&wrqu, 0, sizeof(wrqu));
-		wrqu.data.length = strlen(start_bss_event);
+		wrqu.data.length = strlen(startBssEvent);
 		we_event = IWEVCUSTOM;
-		we_custom_event_generic = start_bss_event;
+		we_custom_event_generic = we_custom_start_event;
 		wlan_hdd_set_tx_flow_info();
 		sap_ctx = WLAN_HDD_GET_SAP_CTX_PTR(link_info);
 		if (!sap_ctx) {
@@ -2626,7 +2661,7 @@ QDF_STATUS hdd_hostapd_sap_event_cb(struct sap_event *sap_event,
 		memset(&wrqu, 0, sizeof(wrqu));
 		wrqu.data.length = sizeof(msg);
 		we_event = IWEVMICHAELMICFAILURE;
-		we_custom_event_generic = (const char *)&msg;
+		we_custom_event_generic = (uint8_t *) &msg;
 	}
 		/* inform mic failure to nl80211 */
 		cfg80211_michael_mic_failure(dev,
@@ -2993,7 +3028,7 @@ QDF_STATUS hdd_hostapd_sap_event_cb(struct sap_event *sap_event,
 		we_event = IWEVCUSTOM;  /* Discovered a new node (AP mode). */
 		wrqu.data.pointer = unknownSTAEvent;
 		wrqu.data.length = strlen(unknownSTAEvent);
-		we_custom_event_generic = unknownSTAEvent;
+		we_custom_event_generic = (uint8_t *) unknownSTAEvent;
 		hdd_err("%s", unknownSTAEvent);
 		break;
 
@@ -3010,7 +3045,7 @@ QDF_STATUS hdd_hostapd_sap_event_cb(struct sap_event *sap_event,
 		we_event = IWEVCUSTOM;  /* Discovered a new node (AP mode). */
 		wrqu.data.pointer = maxAssocExceededEvent;
 		wrqu.data.length = strlen(maxAssocExceededEvent);
-		we_custom_event_generic = maxAssocExceededEvent;
+		we_custom_event_generic = (uint8_t *) maxAssocExceededEvent;
 		hdd_debug("%s", maxAssocExceededEvent);
 		break;
 	case eSAP_STA_ASSOC_IND:
@@ -3200,7 +3235,8 @@ QDF_STATUS hdd_hostapd_sap_event_cb(struct sap_event *sap_event,
 	}
 
 	hdd_wext_send_event(dev, we_event, &wrqu,
-			    we_custom_event_generic);
+			    (char *)we_custom_event_generic);
+	qdf_mem_free(we_custom_start_event);
 	qdf_mem_free(unknownSTAEvent);
 	qdf_mem_free(maxAssocExceededEvent);
 
@@ -3208,8 +3244,9 @@ QDF_STATUS hdd_hostapd_sap_event_cb(struct sap_event *sap_event,
 
 stopbss:
 	{
-		const char *stop_bss_event = "STOP-BSS.response";
-		int event_len = strlen(stop_bss_event);
+		uint8_t *we_custom_event;
+		char *stopBssEvent = "STOP-BSS.response";       /* 17 */
+		int event_len = strlen(stopBssEvent);
 
 		hdd_debug("BSS stop status = %s",
 		       sap_event->sapevt.sapStopBssCompleteEvent.status ?
@@ -3254,14 +3291,26 @@ stopbss:
 			}
 		}
 
+		we_custom_event =
+			qdf_mem_malloc(HDD_MAX_CUSTOM_START_EVENT_SIZE);
+		if (!we_custom_event)
+			return QDF_STATUS_E_NOMEM;
+
 		/* notify userspace that the BSS has stopped */
+		memset(we_custom_event, '\0',
+		       sizeof(HDD_MAX_CUSTOM_START_EVENT_SIZE));
+		memcpy(we_custom_event, stopBssEvent, event_len);
 		memset(&wrqu, 0, sizeof(wrqu));
 		wrqu.data.length = event_len;
 		we_event = IWEVCUSTOM;
-		hdd_wext_send_event(dev, we_event, &wrqu, stop_bss_event);
+		we_custom_event_generic = we_custom_event;
+		hdd_wext_send_event(dev, we_event, &wrqu,
+				    (char *)we_custom_event_generic);
 
+		qdf_mem_free(we_custom_start_event);
 		qdf_mem_free(unknownSTAEvent);
 		qdf_mem_free(maxAssocExceededEvent);
+		qdf_mem_free(we_custom_event);
 
 		/* once the event is set, structure dev/adapter should
 		 * not be touched since they are now subject to being deleted
@@ -4635,7 +4684,7 @@ struct hdd_adapter *hdd_wlan_create_ap_dev(struct hdd_context *hdd_ctx,
 		(int)policy_mgr_get_concurrency_mode(hdd_ctx->psoc));
 
 	/* Init the net_device structure */
-	strlcpy(dev->name, (const char *)iface_name, IFNAMSIZ);
+	strscpy(dev->name, (const char *)iface_name, IFNAMSIZ);
 
 	hdd_set_ap_ops(dev);
 
@@ -7065,8 +7114,6 @@ int wlan_hdd_cfg80211_start_bss(struct wlan_hdd_link_info *link_info,
 
 	sap_ctx = WLAN_HDD_GET_SAP_CTX_PTR(link_info);
 	if (!sap_ctx) {
-		mutex_unlock(&hdd_ctx->sap_lock);
-		hdd_set_connection_in_progress(false);
 		ret = -EINVAL;
 		goto error;
 	}
@@ -7347,7 +7394,6 @@ static int __wlan_hdd_cfg80211_stop_ap(struct wiphy *wiphy,
 				WLAN_IF_MGR_EV_AP_STOP_BSS_COMPLETE, NULL);
 		if (!QDF_IS_STATUS_SUCCESS(status)) {
 			hdd_err("Stopping the BSS failed");
-			mutex_unlock(&hdd_ctx->sap_lock);
 			goto exit;
 		}
 		qdf_mem_free(ap_ctx->beacon);
@@ -8358,6 +8404,33 @@ static int __wlan_hdd_cfg80211_change_beacon(struct wiphy *wiphy,
 	return status;
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 7, 0)
+/**
+ * wlan_hdd_cfg80211_change_beacon() - change beacon content in sap mode
+ * @wiphy: Pointer to wiphy
+ * @dev: Pointer to netdev
+ * @params: Pointer to ap update parameters
+ *
+ * Return: zero for success non-zero for failure
+ */
+int wlan_hdd_cfg80211_change_beacon(struct wiphy *wiphy,
+				    struct net_device *dev,
+				    struct cfg80211_ap_update *params)
+{
+	int errno;
+	struct osif_vdev_sync *vdev_sync;
+
+	errno = osif_vdev_sync_op_start(dev, &vdev_sync);
+	if (errno)
+		return errno;
+
+	errno = __wlan_hdd_cfg80211_change_beacon(wiphy, dev, &params->beacon);
+
+	osif_vdev_sync_op_stop(vdev_sync);
+
+	return errno;
+}
+#else
 /**
  * wlan_hdd_cfg80211_change_beacon() - change beacon content in sap mode
  * @wiphy: Pointer to wiphy
@@ -8383,6 +8456,7 @@ int wlan_hdd_cfg80211_change_beacon(struct wiphy *wiphy,
 
 	return errno;
 }
+#endif
 
 /**
  * hdd_sap_indicate_disconnect_for_sta() - Indicate disconnect indication

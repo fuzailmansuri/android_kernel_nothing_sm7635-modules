@@ -10,210 +10,11 @@
 #include "cam_sensor_core.h"
 #include "camera_main.h"
 #include "cam_compat.h"
-#include <linux/slab.h>
 
 static struct cam_sensor_i3c_sensor_data {
 	struct cam_sensor_ctrl_t                  *s_ctrl;
 	struct completion                          probe_complete;
 } g_i3c_sensor_data[MAX_CAMERAS];
-
-// xft add debug i2c begin
-static struct kobject ext_cam_i2c_kobject;
-static struct cam_nt_i2c_info ext_i2c_info;
-
-static ssize_t ext_cam_i2c_object_show(struct kobject *k, struct attribute *attr, char *buf)
-{
-    struct kobj_attribute *kobj_attr;
-    int ret = -EIO;
-
-    kobj_attr = container_of(attr, struct kobj_attribute, attr);
-
-    if (kobj_attr->show)
-        ret = kobj_attr->show(k, kobj_attr, buf);
-
-    return ret;
-}
-
-static ssize_t ext_cam_i2c_object_store(struct kobject *k, struct attribute *attr, const char *buf, size_t size)
-{
-    struct kobj_attribute *kobj_attr;
-    int ret = -EIO;
-
-    kobj_attr = container_of(attr, struct kobj_attribute, attr);
-
-    if (kobj_attr->store)
-        ret = kobj_attr->store(k, kobj_attr, buf, sizeof(buf));
-
-    return size;
-}
-
-static const struct sysfs_ops ext_cam_i2c_object_sysfs_ops = {
-    .show = ext_cam_i2c_object_show,
-    .store = ext_cam_i2c_object_store,
-};
-
-static struct kobj_type ext_cam_i2c_object_type = {
-    .sysfs_ops = &ext_cam_i2c_object_sysfs_ops,
-    .release   = NULL,
-};
-
-static int ext_cam_i2c_init(void)
-{
-    pr_info("ext_cam_i2c_init Enter\n");
-    memset(&ext_cam_i2c_kobject, 0x00, sizeof(ext_cam_i2c_kobject));
-
-    if (kobject_init_and_add(&ext_cam_i2c_kobject, &ext_cam_i2c_object_type, NULL, "ext_cam_i2c")) {
-        kobject_put(&ext_cam_i2c_kobject);
-        return -ENOMEM;
-    }
-
-    kobject_uevent(&ext_cam_i2c_kobject, KOBJ_ADD);
-
-    return 0;
-}
-
-static ssize_t  ext_cam_i2c_show(struct kobject *kobj,
-                        struct kobj_attribute *attr, char *buf)
-{
-	pr_info("ext_cam_i2c_show Enter\n");
-	if (ext_i2c_info.status >= 2)
-	{
-		if (ext_i2c_info.is_write == 1)
-		{
-			if (ext_i2c_info.status == 2) {
-				strncpy(buf, "WRITE_SUCCESS\n", 15);
-			} else {
-				strncpy(buf, "WRITE_FAIL\n", 12);
-			}
-		} else {
-			if (ext_i2c_info.status == 2) {
-				sprintf(buf, "READ_SUCCESS_0x%x\n", ext_i2c_info.reg_data);
-			} else {
-				strncpy(buf, "READ_FAIL\n", 11);
-			}
-		}
-		pr_info("ext_cam_i2c_show buff=[%s] size = %d\n",buf, strlen(buf));
-	}
-    return strlen(buf);
-}
-
-static ssize_t  ext_cam_i2c_store(struct kobject *kobj,
-                        struct kobj_attribute *attr, const char *buf, size_t size)
-{
-	int index = 0;
-	int i = 0;
-	int count = 0;
-	char tmpStr[128] = {0};
-	ext_i2c_info.status = 0;
-	pr_info("ext_cam_i2c_store buff=[%s] size = %d\n",buf, strlen(buf));
-	for (i = 0; i < strlen(buf); i++)
-	{
-		if (buf[i] == ',')
-		{
-			memset(tmpStr, 0, sizeof(tmpStr));
-			if (i > index) {
-				strncpy(tmpStr, &buf[index], i-index);
-			}
-			index = i+1;
-
-			if (strlen(tmpStr) > 0) {
-				count++;
-				switch(count) {
-					case 1:
-						sscanf(tmpStr, "%x", &ext_i2c_info.slave_addr);
-						break;
-					case 2:
-						if (tmpStr[0] == 'r') {
-							ext_i2c_info.is_write = 0;
-						} else {
-							ext_i2c_info.is_write = 1;
-						}
-						break;
-					case 3:
-						sscanf(tmpStr, "%x", &ext_i2c_info.reg_addr);
-						break;
-					case 4:
-						sscanf(tmpStr, "%x", &ext_i2c_info.reg_data);
-						break;
-					case 5:
-						sscanf(tmpStr, "%d", &ext_i2c_info.reg_addr_type);
-						if (ext_i2c_info.reg_addr_type > 4) {
-							ext_i2c_info.reg_addr_type = 4;
-						}
-						break;
-					case 6:
-						sscanf(tmpStr, "%d", &ext_i2c_info.reg_data_type);
-						if (ext_i2c_info.reg_data_type > 4) {
-							ext_i2c_info.reg_data_type = 4;
-						}
-						break;
-					default:
-						break;
-				}
-			}
-			if (count == 6)
-			{
-				ext_i2c_info.status = 1;
-				pr_info("nthing test i2c info slaveaddr 0x%x addr 0x%x data 0x%x addr_type %d data_type %d is_write %d\n",
-					ext_i2c_info.slave_addr, ext_i2c_info.reg_addr, ext_i2c_info.reg_data,
-					ext_i2c_info.reg_addr_type, ext_i2c_info.reg_data_type, ext_i2c_info.is_write);
-				break;
-			}
-		}
-	}
-    return 1;
-}
-
-static struct kobj_attribute ext_cam_i2c_attribute =
-__ATTR(EXT_CAM_I2C_NT, 0644, ext_cam_i2c_show, ext_cam_i2c_store);
-
-int cam_nt_do_i2c_info(struct cam_sensor_ctrl_t *sctrl)
-{
-	int temp_saddr = 0;
-	int rc = 0;
-	struct cam_sensor_i2c_reg_setting write_setting;
-	struct cam_sensor_i2c_reg_array reg_setting;
-
-	if (ext_i2c_info.status == 1) {
-		temp_saddr = sctrl->io_master_info.cci_client->sid;
-		sctrl->io_master_info.cci_client->sid = ext_i2c_info.slave_addr >> 1;
-		if (ext_i2c_info.is_write == 1)
-		{
-			reg_setting.reg_addr = ext_i2c_info.reg_addr;
-			reg_setting.reg_data = ext_i2c_info.reg_data;
-			reg_setting.delay = 0;
-			reg_setting.data_mask = 0xff;
-			write_setting.reg_setting = &reg_setting;
-			write_setting.size = 1;
-			write_setting.addr_type = ext_i2c_info.reg_addr_type;
-			write_setting.data_type = ext_i2c_info.reg_data_type;
-			write_setting.delay = 0;
-			write_setting.read_buff = NULL;
-			write_setting.read_buff_len = 0;
-			rc = camera_io_dev_write(
-				&(sctrl->io_master_info),
-				&(write_setting));
-		} else {
-			rc = camera_io_dev_read(
-				&(sctrl->io_master_info),
-				ext_i2c_info.reg_addr,
-				&ext_i2c_info.reg_data,
-				ext_i2c_info.reg_addr_type,
-				ext_i2c_info.reg_data_type,
-				true);
-		}
-		if (rc) {
-			ext_i2c_info.status = 3;
-		} else {
-			ext_i2c_info.status = 2;
-		}
-		sctrl->io_master_info.cci_client->sid = temp_saddr;
-	}
-	return 0;
-}
-
-// xft add debug i2c end
-
 
 struct completion *cam_sensor_get_i3c_completion(uint32_t index)
 {
@@ -832,21 +633,194 @@ static struct i3c_driver cam_sensor_i3c_driver = {
 	},
 };
 
+/*Begin zihao.li for [Task][FP5-1587] FP5 camera device info in camera.ko on 20230628*/
+#include <linux/init.h>
+#include <linux/kernel.h>
+#include <linux/device.h>
+#include <linux/module.h>
+
+#define show_function(name) \
+    static ssize_t show_##name(struct device *dev,\
+            struct device_attribute *att,\
+            char *buf)\
+{\
+    return snprintf(buf, PAGE_SIZE, "%s\n", name);\
+}\
+
+static struct class *deviceinfo_class = NULL;
+static struct device *deviceinfo_dev = NULL;
+
+unsigned char CamNameB[128] = "NA:NA:NA";
+EXPORT_SYMBOL(CamNameB);
+show_function(CamNameB);
+DEVICE_ATTR(CamNameB, 0444, show_CamNameB, NULL);
+
+unsigned char CamNameF[128] = "NA:NA:NA";
+EXPORT_SYMBOL(CamNameF);
+show_function(CamNameF);
+DEVICE_ATTR(CamNameF, 0444, show_CamNameF, NULL);
+
+unsigned char CamNameB2[128] = "NA:NA:NA";
+EXPORT_SYMBOL(CamNameB2);
+show_function(CamNameB2);
+DEVICE_ATTR(CamNameB2, 0444, show_CamNameB2, NULL);
+
+unsigned char CamOTPB[128] = "NA:NA:NA";
+EXPORT_SYMBOL(CamOTPB);
+show_function(CamOTPB);
+
+unsigned char CamOTPF[128] = "NA:NA:NA";
+EXPORT_SYMBOL(CamOTPF);
+show_function(CamOTPF);
+
+unsigned char CamOTPB2[128] = "NA:NA:NA";
+EXPORT_SYMBOL(CamOTPB2);
+show_function(CamOTPB2);
+
+static ssize_t CamOTPB_store(struct device *dev,struct  device_attribute *attr,const char *buf,size_t count)
+{
+    int camerab_otp_flag;
+    sscanf(buf,"%d",&camerab_otp_flag);
+    if(camerab_otp_flag==1){
+        printk("otp flag=1\n");
+        sprintf(CamOTPB,"%s","1");
+    }else{
+        printk("otp flag = 0\n");
+        sprintf(CamOTPB,"%s%","0");
+    }
+
+    return count;
+}
+
+static ssize_t CamOTPF_store(struct device *dev,struct  device_attribute *attr,const char *buf,size_t count)
+{
+    int camerab_otp_flag;
+    sscanf(buf,"%d",&camerab_otp_flag);
+    if(camerab_otp_flag==1){
+        printk("otp flag=1\n");
+        sprintf(CamOTPF,"%s","1");
+    }else{
+        printk("otp flag = 0\n");
+        sprintf(CamOTPF,"%s","0");
+    }
+
+    return count;
+}
+
+static ssize_t CamOTPB2_store(struct device *dev,struct  device_attribute *attr,const char *buf,size_t count)
+{
+        int camerab_otp_flag;
+        sscanf(buf,"%d",&camerab_otp_flag);
+
+        if(camerab_otp_flag==1){
+                printk("otp flag=1\n");
+                sprintf(CamOTPB2,"%s","1");
+        }else{
+            printk("otp flag = 0\n");
+            sprintf(CamOTPB2,"%s","0");
+        }
+
+        return count;
+}
+
+DEVICE_ATTR(CamOTPB, 0664, show_CamOTPB, CamOTPB_store);
+DEVICE_ATTR(CamOTPF, 0664, show_CamOTPF, CamOTPF_store);
+DEVICE_ATTR(CamOTPB2, 0664, show_CamOTPB2, CamOTPB2_store);
+
+static struct device_attribute *attr[] = {
+    &dev_attr_CamNameB,
+    &dev_attr_CamNameF,
+    &dev_attr_CamNameB2,
+    &dev_attr_CamOTPB,
+    &dev_attr_CamOTPF,
+    &dev_attr_CamOTPB2,
+    NULL,
+};
+
+static int create_deviceinfo_nodes(void)
+{
+    int ret, i = 0;
+
+    while (attr[i] != NULL) {
+        ret = device_create_file(deviceinfo_dev,  attr[i]);
+        if (ret < 0) {
+            pr_err("Failed to create file for node:%s\n", attr[i]->attr.name);
+            i = i - 1;
+            while (i >= 0) {
+                device_remove_file(deviceinfo_dev, attr[i]);
+                i--;
+            }
+            return -EFAULT;
+        }
+        i++;
+    }
+
+    return 0;
+}
+
+static void remove_deviceinfo_nodes(void)
+{
+    int i = 0;
+
+    while (attr[i] != NULL) {
+        device_remove_file(deviceinfo_dev, attr[i]);
+        i++;
+    }
+}
+
+int deviceinfo_init(void)
+{
+    int ret = -1;
+
+    deviceinfo_class = class_create(THIS_MODULE, "deviceinfo");
+    if (IS_ERR(deviceinfo_class)) {
+        pr_err("Failed to create device info class!\n");
+        return -ENOMEM;
+    }
+
+    deviceinfo_dev = device_create(deviceinfo_class, NULL, 0, NULL,
+                                   "device_info");
+    if (IS_ERR(deviceinfo_dev)) {
+        pr_err("Failed to create device info device!\n");
+        return -ENOMEM;
+    }
+
+    ret = create_deviceinfo_nodes();
+    if (ret) {
+        pr_err("Failed to create all device info nodes!\n");
+        return -EFAULT;
+    }
+
+    return ret;
+}
+
+void deviceinfo_exit(void)
+{
+    remove_deviceinfo_nodes();
+    device_destroy(deviceinfo_class, 0);
+    class_destroy(deviceinfo_class);
+
+    return;
+}
+/*End   zihao.li for [Task][FP5-1587] FP5 camera device info in camera.ko on 20230628*/
+
 int cam_sensor_driver_init(void)
 {
 	int rc;
 	struct device_node                      *dev;
 	int num_entries = 0;
-	int tmp_rc = 0;
-
-	tmp_rc = ext_cam_i2c_init();
-	tmp_rc = sysfs_create_file(&ext_cam_i2c_kobject, &ext_cam_i2c_attribute.attr);
 
 	rc = platform_driver_register(&cam_sensor_platform_driver);
 	if (rc < 0) {
 		CAM_ERR(CAM_SENSOR, "platform_driver_register Failed: rc = %d", rc);
 		return rc;
 	}
+
+	/*Begin zihao.li for [Task][FP5-1587] FP5 camera device info in camera.ko on 20230628*/
+	rc = deviceinfo_init();
+	if(rc)
+		CAM_ERR(CAM_SENSOR, "deviceinfo_init failed rc = %d", rc);
+	/*End   zihao.li for [Task][FP5-1587] FP5 camera device info in camera.ko on 20230628*/
 
 	rc = i2c_add_driver(&cam_sensor_i2c_driver);
 	if (rc) {
@@ -896,6 +870,10 @@ void cam_sensor_driver_exit(void)
 
 	platform_driver_unregister(&cam_sensor_platform_driver);
 	i2c_del_driver(&cam_sensor_i2c_driver);
+
+	/*Begin zihao.li for [Task][FP5-1587] FP5 camera device info in camera.ko on 20230628*/
+	deviceinfo_exit();
+	/*End   zihao.li for [Task][FP5-1587] FP5 camera device info in camera.ko on 20230628*/
 
 	dev = of_find_node_by_path(I3C_SENSOR_DEV_ID_DT_PATH);
 	if (!dev) {

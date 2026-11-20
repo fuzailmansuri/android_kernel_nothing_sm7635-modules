@@ -8,17 +8,15 @@ def define_basic_modules(targets, variants):
 
 def define_modules(target, variant):
     tv = "{}_{}".format(target, variant)
-    rule_base = "{}_goodix_fp".format(tv)
+    rule_base = "{}_qbt_handler".format(tv)
 
     ddk_module(
         name = rule_base,
-        out = "goodix_fp.ko",
+        out = "qbt_handler.ko",
         deps = ["//msm-kernel:all_headers"],
         srcs = [
-            "goodix/gf_spi.c",
-            "goodix/netlink.c",
-            "goodix/platform.c",
-            "goodix/gf_spi.h"
+            "qbt_handler.c",
+            "qbt_handler.h"
         ],
         includes = ["include/linux"],
         kernel_build = "//msm-kernel:{}".format(tv),

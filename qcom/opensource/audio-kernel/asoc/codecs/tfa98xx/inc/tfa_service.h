@@ -1,6 +1,6 @@
-/* 
+/*
  * Copyright (C) 2014-2020 NXP Semiconductors, All Rights Reserved.
- * Copyright 2020 GOODIX 
+ * Copyright 2020 GOODIX
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -14,7 +14,7 @@
 #define TFA_SERVICE_H
 
 //#include "config.h"
-// workaround for Visual Studio: 
+// workaround for Visual Studio:
 // fatal error C1083: Cannot open include file: 'config.h': No such file or directory
 #ifdef __KERNEL__
 #include <linux/types.h>
@@ -88,11 +88,11 @@ extern "C" {
 #define TFA72_ALGOPARAMETER_LENGTH_MONO		(3*183)
 #define TFA72_ALGOPARAMETER_LENGTH_STEREO	(3*356)
 #define TFA2_MBDRCPARAMETER_LENGTH			(3*152)	/* 154 is including the cmd-id */
-#define TFA72_MBDRCPARAMETER_LENGTH			(3*98)	
+#define TFA72_MBDRCPARAMETER_LENGTH			(3*98)
 #define TFA1_PRESET_LENGTH					87
 #define TFA1_DRC_LENGTH						381		/* 127 words */
 #define TFA2_FILTERCOEFSPARAMETER_LENGTH	(3*168) /* 170 is including the cmd-id */
-#define TFA72_FILTERCOEFSPARAMETER_LENGTH	(3*156) 
+#define TFA72_FILTERCOEFSPARAMETER_LENGTH	(3*156)
 
 /* Maximum number of retries for DSP result
  * Keep this value low!
@@ -147,7 +147,7 @@ enum Tfa98xx_Error {
 	Tfa98xx_Error_Other = 1000
 };
 
-/* 
+/*
  * Type containing all the possible msg returns DSP can give
  *  //TODO move to tfa_dsp_fw.h
  */
@@ -410,7 +410,7 @@ void tfa98xx_rev(int *major, int *minor, int *revision);
 /*
  * Return the feature bits from MTP and cnt file for comparison
  */
-enum Tfa98xx_Error 
+enum Tfa98xx_Error
 tfa98xx_compare_features(struct tfa_device *tfa, int features_from_MTP[3], int features_from_cnt[3]);
 
 /*
@@ -452,7 +452,7 @@ enum Tfa98xx_Error tfa98xx_dsp_system_stable(struct tfa_device *tfa, int *ready)
 
 enum Tfa98xx_Error tfa98xx_auto_copy_mtp_to_iic(struct tfa_device *tfa);
 
-/** 
+/**
  * check the state of the DSP coolflux
  * @param tfa the device struct pointer
  * @return the value of CFE
@@ -465,7 +465,7 @@ int tfa_cf_enabled(struct tfa_device *tfa);
  */
 
 /**
- * patch the ROM code of the DSP 
+ * patch the ROM code of the DSP
  * @param tfa the device struct pointer
  * @param patchLength the number of bytes of patchBytes
  * @param patchBytes pointer to the bytes to patch
@@ -474,33 +474,33 @@ enum Tfa98xx_Error tfa_dsp_patch(struct tfa_device *tfa,
 				 int patchLength,
 				 const unsigned char *patchBytes);
 
-/** 
+/**
  * load explicitly the speaker parameters in case of free speaker,
- * or when using a saved speaker model 
+ * or when using a saved speaker model
  */
 enum Tfa98xx_Error tfa98xx_dsp_write_speaker_parameters(
 				struct tfa_device *tfa,
 				int length,
 				const unsigned char *pSpeakerBytes);
 
-/** 
- * read the speaker parameters as used by the SpeakerBoost processing 
+/**
+ * read the speaker parameters as used by the SpeakerBoost processing
  */
 enum Tfa98xx_Error tfa98xx_dsp_read_speaker_parameters(
 				struct tfa_device *tfa,
 				int length,
 				unsigned char *pSpeakerBytes);
 
-/** 
- * read the current status of the DSP, typically used for development, 
- * not essential to be used in a product                               
+/**
+ * read the current status of the DSP, typically used for development,
+ * not essential to be used in a product
  */
 enum Tfa98xx_Error tfa98xx_dsp_get_state_info(
-				struct tfa_device *tfa, 
+				struct tfa_device *tfa,
 				unsigned char bytes[],
 				unsigned int *statesize);
 
-/** 
+/**
  * Check whether the DSP supports DRC
  * pbSupportDrc=1 when DSP supports DRC,
  * pbSupportDrc=0 when DSP doesn't support it
@@ -511,47 +511,47 @@ enum Tfa98xx_Error tfa98xx_dsp_support_drc(struct tfa_device *tfa,
 enum Tfa98xx_Error
 tfa98xx_dsp_support_framework(struct tfa_device *tfa, int *pbSupportFramework);
 
-/** 
- * read the speaker excursion model as used by SpeakerBoost processing 
+/**
+ * read the speaker excursion model as used by SpeakerBoost processing
  */
 enum Tfa98xx_Error tfa98xx_dsp_read_excursion_model(
 				struct tfa_device *tfa,
 				int length,
 				unsigned char *pSpeakerBytes);
 
-/** 
- * load all the parameters for a preset from a file 
+/**
+ * load all the parameters for a preset from a file
  */
 enum Tfa98xx_Error tfa98xx_dsp_write_preset(struct tfa_device *tfa,
 				       int length, const unsigned char
 				       *pPresetBytes);
 
-/** 
- * wrapper for dsp_msg that adds opcode and only writes 
+/**
+ * wrapper for dsp_msg that adds opcode and only writes
  */
 enum Tfa98xx_Error tfa_dsp_cmd_id_write(struct tfa_device *tfa,
 			   unsigned char module_id,
 			   unsigned char param_id, int num_bytes,
                            const unsigned char data[]);
 
-/** 
- * wrapper for dsp_msg that writes opcode and reads back the data 
+/**
+ * wrapper for dsp_msg that writes opcode and reads back the data
  */
 enum Tfa98xx_Error tfa_dsp_cmd_id_write_read(struct tfa_device *tfa,
 			   unsigned char module_id,
 			   unsigned char param_id, int num_bytes,
                            unsigned char data[]);
 
-/** 
- * wrapper for dsp_msg that adds opcode and 3 bytes required for coefs 
+/**
+ * wrapper for dsp_msg that adds opcode and 3 bytes required for coefs
  */
 enum Tfa98xx_Error tfa_dsp_cmd_id_coefs(struct tfa_device *tfa,
 			   unsigned char module_id,
 			   unsigned char param_id, int num_bytes,
 			   unsigned char data[]);
 
-/** 
- * wrapper for dsp_msg that adds opcode and 3 bytes required for MBDrcDynamics 
+/**
+ * wrapper for dsp_msg that adds opcode and 3 bytes required for MBDrcDynamics
  */
 enum Tfa98xx_Error tfa_dsp_cmd_id_MBDrc_dynamics(struct tfa_device *tfa,
 			   unsigned char module_id,
@@ -695,8 +695,8 @@ enum Tfa98xx_Error tfa98xx_write_data(struct tfa_device *tfa,
 				  const unsigned char data[]);
 
 enum Tfa98xx_Error tfa98xx_write_raw(struct tfa_device *tfa,
-		  	  	  int num_bytes,
-		  	  	  const unsigned char data[]);
+                                  int num_bytes,
+                                  const unsigned char data[]);
 
 /* support for converting error codes into text */
 const char *tfa98xx_get_error_string(enum Tfa98xx_Error error);
@@ -713,8 +713,8 @@ void tfa98xx_convert_data2bytes(int num_data, const int data[],
 			       unsigned char bytes[]);
 
 /**
- * convert memory bytes to signed 24 bit integers  
- * input:  bytes contains "num_bytes" byte elements 
+ * convert memory bytes to signed 24 bit integers
+ * input:  bytes contains "num_bytes" byte elements
  * output: data contains "num_bytes/3" int24 elements
  * @param num_bytes length of the input data array
  * @param bytes input data as unsigned char array
@@ -819,7 +819,7 @@ enum Tfa98xx_Error tfa_dsp_msg_read_rpc(struct tfa_device *tfa,int length, unsig
 int tfa_set_bf(struct tfa_device *tfa, const uint16_t bf, const uint16_t value);
 int tfa_set_bf_volatile(struct tfa_device *tfa, const uint16_t bf, const uint16_t value);
 
-/** 
+/**
  * Get the value of a given bitfield
  * @param tfa the device struct pointer
  * @param bf the value indicating which bitfield
@@ -830,7 +830,7 @@ int tfa_get_bf(struct tfa_device *tfa, const uint16_t bf);
  * Set the value of a given bitfield
  * @param bf the value indicating which bitfield
  * @param bf_value the value of the bitfield
- * @param p_reg_value a pointer to the register where to write the bitfield value 
+ * @param p_reg_value a pointer to the register where to write the bitfield value
  */
 int tfa_set_bf_value(const uint16_t bf, const uint16_t bf_value, uint16_t *p_reg_value);
 
@@ -839,35 +839,35 @@ int tfa_write_reg(struct tfa_device *tfa, const uint16_t bf, const uint16_t reg_
 int tfa_read_reg(struct tfa_device *tfa, const uint16_t bf);
 
 /* bitfield */
-/** 
+/**
  * get the datasheet or bitfield name corresponding to the bitfield number
  * @param num is the number for which to get the bitfield name
  * @param rev is the device type
  */
 char *tfaContBfName(uint16_t num, unsigned short rev);
 
-/** 
+/**
  * get the datasheet name corresponding to the bitfield number
  * @param num is the number for which to get the bitfield name
  * @param rev is the device type
  */
 char *tfaContDsName(uint16_t num, unsigned short rev);
 
-/** 
+/**
  * get the bitfield name corresponding to the bitfield number
  * @param num is the number for which to get the bitfield name
  * @param rev is the device type
  */
 char *tfaContBitName(uint16_t num, unsigned short rev);
 
-/** 
+/**
  * get the bitfield number corresponding to the bitfield name
  * @param name is the bitfield name for which to get the bitfield number
  * @param rev is the device type
  */
 uint16_t tfaContBfEnum(const char *name, unsigned short rev);
 
-/** 
+/**
 * get the bitfield number corresponding to the bitfield name, checks for all devices
 * @param name is the bitfield name for which to get the bitfield number
  */
@@ -937,7 +937,7 @@ enum Tfa98xx_Error tfaRunStartup(struct tfa_device *tfa, int profile);
  * this implies a full system startup when the system was not already started
  * @param tfa the device struct pointer
  * @param force indicates wether a full system startup should be allowed
- * @param profile the profile that should be loaded 
+ * @param profile the profile that should be loaded
  */
 enum Tfa98xx_Error tfaRunSpeakerBoost(struct tfa_device *tfa, int force, int profile);
 
@@ -973,20 +973,20 @@ enum Tfa98xx_Error tfa_cf_powerup(struct tfa_device *tfa);
  */
 enum Tfa98xx_Error tfa_show_current_state(struct tfa_device *tfa);
 
-/** 
- * Init registers and coldboot dsp 
+/**
+ * Init registers and coldboot dsp
  * @param tfa the device struct pointer
  */
 int tfa_reset(struct tfa_device *tfa);
 
 /**
- * Get profile from a register 
+ * Get profile from a register
  * @param tfa the device struct pointer
  */
 int tfa_dev_get_swprof(struct tfa_device *tfa);
 
-/** 
- * Save profile in a register 
+/**
+ * Save profile in a register
  */
 int tfa_dev_set_swprof(struct tfa_device *tfa, unsigned short new_value);
 
@@ -1013,7 +1013,7 @@ int tfa_get_noclk(struct tfa_device *tfa);
 enum Tfa98xx_Error tfa_status(struct tfa_device *tfa);
 
 /*
- * function overload for flag_mtp_busy 
+ * function overload for flag_mtp_busy
  */
 int tfa_dev_get_mtpb(struct tfa_device *tfa);
 

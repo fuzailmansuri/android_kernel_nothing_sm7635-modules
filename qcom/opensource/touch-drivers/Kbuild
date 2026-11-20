@@ -133,6 +133,27 @@ ifeq ($(CONFIG_TOUCH_FOCALTECH), y)
 	obj-$(CONFIG_MSM_TOUCH) += focaltech_fts.o
 endif
 
+ifeq ($(CONFIG_TOUCHSCREEN_FTS), y)
+	LINUX_INC += -include $(TOUCH_ROOT)/focaltech_touch_ft3169/focaltech_common.h
+	LINUX_INC += -include $(TOUCH_ROOT)/focaltech_touch_ft3169/focaltech_config.h
+	LINUX_INC += -include $(TOUCH_ROOT)/focaltech_touch_ft3169/focaltech_core.h
+	LINUX_INC += -include $(TOUCH_ROOT)/focaltech_touch_ft3169/focaltech_flash.h
+
+	focaltech_tp-y := \
+		 ./focaltech_touch_ft3169/focaltech_core.o \
+		 ./focaltech_touch_ft3169/focaltech_ex_fun.o \
+		 ./focaltech_touch_ft3169/focaltech_ex_mode.o \
+		 ./focaltech_touch_ft3169/focaltech_gesture.o \
+		 ./focaltech_touch_ft3169/focaltech_esdcheck.o \
+		 ./focaltech_touch_ft3169/focaltech_point_report_check.o \
+		 ./focaltech_touch_ft3169/focaltech_proximity.o \
+		 ./focaltech_touch_ft3169/focaltech_i2c.o \
+		 ./focaltech_touch_ft3169/focaltech_flash.o \
+		 ./focaltech_touch_ft3169/focaltech_flash/focaltech_upgrade_ft3169.o
+
+	obj-$(CONFIG_MSM_TOUCH) += focaltech_tp.o
+endif
+
 ifeq ($(CONFIG_TOUCHSCREEN_NT36XXX_I2C), y)
 	LINUX_INC += -include $(TOUCH_ROOT)/nt36xxx/nt36xxx.h
 	LINUX_INC += -include $(TOUCH_ROOT)/nt36xxx/nt36xxx_mem_map.h
@@ -160,9 +181,36 @@ ifeq ($(CONFIG_TOUCHSCREEN_GOODIX_BRL), y)
 		 ./goodix_berlin_driver/goodix_ts_gesture.o \
 		 ./goodix_berlin_driver/goodix_ts_inspect.o \
 		 ./goodix_berlin_driver/goodix_brl_spi.o \
-		 ./goodix_berlin_driver/goodix_brl_i2c.o
+		 ./goodix_berlin_driver/goodix_brl_i2c.o \
+		 ./goodix_berlin_driver/goodix_ts_proc.o \
 
 	obj-$(CONFIG_MSM_TOUCH) += goodix_ts.o
+endif
+
+ifeq ($(CONFIG_TOUCHSCREEN_EPHTouch), y)
+	LINUX_INC += -include $(TOUCH_ROOT)/eswin_touch/eswin_eph861x.h
+	LINUX_INC += -include $(TOUCH_ROOT)/eswin_touch/eswin_eph861x_bootloader.h
+	LINUX_INC += -include $(TOUCH_ROOT)/eswin_touch/eswin_eph861x_comms.h
+	LINUX_INC += -include $(TOUCH_ROOT)/eswin_touch/eswin_eph861x_eswin.h
+	LINUX_INC += -include $(TOUCH_ROOT)/eswin_touch/eswin_eph861x_i2c.h
+	LINUX_INC += -include $(TOUCH_ROOT)/eswin_touch/eswin_eph861x_project_config.h
+	LINUX_INC += -include $(TOUCH_ROOT)/eswin_touch/eswin_eph861x_spi.h
+	LINUX_INC += -include $(TOUCH_ROOT)/eswin_touch/eswin_eph861x_tlv.h
+	LINUX_INC += -include $(TOUCH_ROOT)/eswin_touch/eswin_eph861x_tlv_command.h
+	LINUX_INC += -include $(TOUCH_ROOT)/eswin_touch/eswin_eph861x_tlv_report.h
+	LINUX_INC += -include $(TOUCH_ROOT)/eswin_touch/eswin_eph861x_types.h
+
+	eswin_ts-y := \
+		 ./eswin_touch/eswin_eph861x.o \
+		 ./eswin_touch/eswin_eph861x_bootloader.o \
+		 ./eswin_touch/eswin_eph861x_comms.o \
+		 ./eswin_touch/eswin_eph861x_eswin.o \
+		 ./eswin_touch/eswin_eph861x_i2c.o \
+		 ./eswin_touch/eswin_eph861x_spi.o \
+		 ./eswin_touch/eswin_eph861x_tlv_command.o \
+		 ./eswin_touch/eswin_eph861x_tlv_report.o
+
+	obj-$(CONFIG_MSM_TOUCH) += eswin_ts.o
 endif
 
 ifeq ($(CONFIG_TOUCHSCREEN_ATMEL_MXT), y)

@@ -768,17 +768,15 @@ int kgsl_pwrscale_init(struct kgsl_device *device, struct platform_device *pdev,
 	pwrscale->devfreq_notify_worker = kthread_create_worker(0, "kgsl_devfreq_notifier");
 	if (IS_ERR(pwrscale->devfreq_notify_worker)) {
 		ret = PTR_ERR(pwrscale->devfreq_notify_worker);
-		pwrscale->devfreq_notify_worker = NULL;
 		dev_err(device->dev, "Failed to create devfreq notify worker ret: %d\n", ret);
-		goto err_workqueue;
+		return ret;
 	}
-	kthread_init_work(&pwrscale->devfreq_notify_work, do_devfreq_notify);
-	sched_set_fifo(pwrscale->devfreq_notify_worker->task);
 
 	ret = msm_adreno_tz_init();
 	if (ret) {
 		dev_err(device->dev, "Failed to add adreno tz governor: %d\n", ret);
-		goto err_worker;
+		device->pwrscale.enabled = false;
+		return ret;
 	}
 
 	pwr->nb_max.notifier_call = thermal_max_notifier_call;
@@ -786,14 +784,17 @@ int kgsl_pwrscale_init(struct kgsl_device *device, struct platform_device *pdev,
 
 	if (ret) {
 		dev_err(device->dev, "Unable to register notifier call for thermal: %d\n", ret);
-		goto err_governor;
+		device->pwrscale.enabled = false;
+		msm_adreno_tz_exit();
+		return ret;
 	}
 
 	devfreq = devfreq_add_device(&pdev->dev, &gpu_profile->profile,
 			governor, &adreno_tz_data);
 	if (IS_ERR_OR_NULL(devfreq)) {
-		ret = IS_ERR(devfreq) ? PTR_ERR(devfreq) : -EINVAL;
-		goto err_notifier;
+		device->pwrscale.enabled = false;
+		msm_adreno_tz_exit();
+		return IS_ERR(devfreq) ? PTR_ERR(devfreq) : -EINVAL;
 	}
 
 	pwrscale->enabled = true;
@@ -811,29 +812,19 @@ int kgsl_pwrscale_init(struct kgsl_device *device, struct platform_device *pdev,
 
 	INIT_WORK(&pwrscale->devfreq_suspend_ws, do_devfreq_suspend);
 	INIT_WORK(&pwrscale->devfreq_resume_ws, do_devfreq_resume);
+	kthread_init_work(&pwrscale->devfreq_notify_work, do_devfreq_notify);
+	sched_set_fifo(pwrscale->devfreq_notify_worker->task);
 	pwrscale->next_governor_call = ktime_add_us(ktime_get(),
 			KGSL_GOVERNOR_CALL_INTERVAL);
 
 	return 0;
-err_notifier:
-	dev_pm_qos_remove_notifier(&pdev->dev, &pwr->nb_max, DEV_PM_QOS_MAX_FREQUENCY);
-err_governor:
-	msm_adreno_tz_exit();
-err_worker:
-	kthread_destroy_worker(pwrscale->devfreq_notify_worker);
-	pwrscale->devfreq_notify_worker = NULL;
-err_workqueue:
-	destroy_workqueue(pwrscale->devfreq_wq);
-	pwrscale->devfreq_wq = NULL;
-	pwrscale->enabled = false;
-	return ret;
 }
 
 /*
  * kgsl_pwrscale_close - clean up pwrscale
  * @device: the device
  *
- * This function must be called with the device mutex unlocked.
+ * This function should be called with the device mutex locked.
  */
 void kgsl_pwrscale_close(struct kgsl_device *device)
 {
@@ -842,18 +833,6 @@ void kgsl_pwrscale_close(struct kgsl_device *device)
 
 	pwr = &device->pwrctrl;
 	pwrscale = &device->pwrscale;
-
-	pwrscale->enabled = false;
-	if (pwrscale->devfreq_notify_worker) {
-		kthread_destroy_worker(pwrscale->devfreq_notify_worker);
-		pwrscale->devfreq_notify_worker = NULL;
-	}
-
-	if (pwrscale->devfreq_wq) {
-		flush_workqueue(pwrscale->devfreq_wq);
-		destroy_workqueue(pwrscale->devfreq_wq);
-		pwrscale->devfreq_wq = NULL;
-	}
 
 	if (pwrscale->bus_devfreq) {
 		devfreq_remove_device(pwrscale->bus_devfreq);
@@ -867,6 +846,15 @@ void kgsl_pwrscale_close(struct kgsl_device *device)
 		return;
 	if (pwrscale->cooling_dev)
 		devfreq_cooling_unregister(pwrscale->cooling_dev);
+
+	if (!IS_ERR_OR_NULL(pwrscale->devfreq_notify_worker))
+		kthread_destroy_worker(pwrscale->devfreq_notify_worker);
+
+	if (pwrscale->devfreq_wq) {
+		flush_workqueue(pwrscale->devfreq_wq);
+		destroy_workqueue(pwrscale->devfreq_wq);
+		pwrscale->devfreq_wq = NULL;
+	}
 
 	devfreq_remove_device(device->pwrscale.devfreqptr);
 	device->pwrscale.devfreqptr = NULL;

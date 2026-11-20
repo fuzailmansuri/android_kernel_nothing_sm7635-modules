@@ -1,6 +1,6 @@
-/* 
+/*
  * Copyright (C) 2014-2020 NXP Semiconductors, All Rights Reserved.
- * Copyright 2020 GOODIX 
+ * Copyright 2020 GOODIX
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -10,7 +10,7 @@
 
 
 /** Filename: tfa9873_tfaFieldnames.h
- *  This file was generated automatically on 10/21/19 at 17:03:34. 
+ *  This file was generated automatically on 10/21/19 at 17:03:34.
  *  Source file: TFA9873_PRB4_N1A0_I2C_RegisterMap.xlsx
  */
 

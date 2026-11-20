@@ -224,4 +224,3 @@ struct tfa98xx {
 
 
 #endif /* __TFA98XX_INC__ */
-

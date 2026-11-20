@@ -429,7 +429,7 @@ static int hwsched_sendcmd(struct adreno_device *adreno_dev,
 	struct kgsl_context *context = drawobj->context;
 	int ret;
 	struct cmd_list_obj *obj;
-	bool boost_submission = current->policy == SCHED_NORMAL;
+	int is_current_rt = rt_task(current);
 	int nice = task_nice(current);
 
 	obj = kmem_cache_alloc(obj_cache, GFP_KERNEL);
@@ -438,8 +438,8 @@ static int hwsched_sendcmd(struct adreno_device *adreno_dev,
 
 	mutex_lock(&device->mutex);
 
-	/* Reduce submission preemption while holding the device mutex. */
-	if (boost_submission)
+	/* Elevating thread’s priority to avoid context switch with holding device mutex */
+	if (!is_current_rt)
 		sched_set_fifo(current);
 
 	if (_abort_submission(adreno_dev)) {
@@ -504,7 +504,7 @@ static int hwsched_sendcmd(struct adreno_device *adreno_dev,
 	list_add_tail(&obj->node, &hwsched->cmd_list);
 
 done:
-	if (boost_submission)
+	if (!is_current_rt)
 		sched_set_normal(current, nice);
 	mutex_unlock(&device->mutex);
 	if (ret)
